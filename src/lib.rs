@@ -18,6 +18,7 @@ pub fn build_target(
     aliases: &analyze::Aliases,
     target: &Target,
     default_minify: Minify,
+    external: &[String],
 ) -> Result<Bundle> {
     let entry = tree.find_file(&target.entry)?;
     let name = target.script_name();
@@ -27,6 +28,7 @@ pub fn build_target(
         entry,
         minify: target.minify.unwrap_or(default_minify),
         script_name: name.clone(),
+        external,
     });
     if !bundle.has_errors() {
         output::write_bundle(&bundle, &target.output)?;

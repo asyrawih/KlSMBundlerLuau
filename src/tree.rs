@@ -91,12 +91,28 @@ struct SourcemapOut<'a> {
     children: Vec<SourcemapOut<'a>>,
 }
 
+/// A double-quoted Luau string literal.
+pub fn lua_string(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c if (c as u32) < 32 => out.push_str(&format!("\\{:03}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 pub fn normalize(path: &str) -> String {
     path.replace('\\', "/").trim_start_matches("./").to_string()
 }
 
 /// Top-level folders Script Sync creates for services; anything else at the top is a Folder.
-const SERVICES: &[&str] = &[
+pub const SERVICES: &[&str] = &[
     "Workspace",
     "Players",
     "Lighting",
@@ -458,6 +474,36 @@ impl Tree {
             cur = self.nodes[c].parent;
         }
         out.reverse();
+        out
+    }
+
+    /// Whether `id` is at or below one of `prefixes` (dot or slash separated instance
+    /// paths from `game`, e.g. `ReplicatedStorage.Packages`).
+    pub fn is_under(&self, id: NodeId, prefixes: &[String]) -> bool {
+        let segments = self.segments(id);
+        prefixes.iter().any(|p| {
+            let p: Vec<&str> = p
+                .split(['.', '/'])
+                .filter(|s| !s.is_empty() && *s != "game")
+                .collect();
+            !p.is_empty()
+                && segments.len() >= p.len()
+                && segments.iter().zip(&p).all(|(a, b)| a == b)
+        })
+    }
+
+    /// A Luau expression that reaches `id` at runtime from `game`:
+    /// `game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("X")`.
+    pub fn runtime_path(&self, id: NodeId) -> String {
+        let mut out = String::from("game");
+        for (i, seg) in self.segments(id).iter().enumerate() {
+            let method = if i == 0 && SERVICES.contains(&seg.as_str()) {
+                "GetService"
+            } else {
+                "WaitForChild"
+            };
+            out.push_str(&format!(":{method}({})", lua_string(seg)));
+        }
         out
     }
 

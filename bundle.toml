@@ -1,13 +1,14 @@
 # Sync folder = game. Paths below are relative to this file.
 root = "../RessoMusic"
 minify = "full"
+external = ["ReplicatedStorage"]
 
 [[bundle]]
 entry  = "ServerScriptService/Server/Main.server.luau"
-output = "dist/Server.server.luau"
+output = "/Users/dxh4nan/Documents/RessoMusic/ServerScriptService/Loader.server.luau"
 rbxmx  = "dist/Server.rbxmx"
 
 [[bundle]]
 entry  = "StarterPlayerScripts/Client/Main.local.luau"
-output = "dist/Client.local.luau"
+output = "/Users/dxh4nan/Documents/RessoMusic/StarterPlayerScripts/Loader.local.luau"
 rbxmx  = "dist/Client.rbxmx"

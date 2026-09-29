@@ -18,6 +18,10 @@ pub struct Config {
     pub regenerate_sourcemap: bool,
     #[serde(default)]
     pub minify: Minify,
+    /// Instance paths whose modules are left in the game instead of bundled
+    /// (`["ReplicatedStorage"]`, `["ReplicatedStorage.Packages"]`).
+    #[serde(default)]
+    pub external: Vec<String>,
     #[serde(rename = "bundle", default)]
     pub bundles: Vec<Target>,
 }
@@ -34,9 +38,21 @@ pub struct Target {
     pub minify: Option<Minify>,
     /// Name of the script at runtime; defaults to the output file name up to the first dot.
     pub name: Option<String>,
+    /// Added to the top-level `external` list for this bundle only.
+    #[serde(default)]
+    pub external: Vec<String>,
 }
 
 impl Target {
+    /// The top-level and per-bundle external paths together.
+    pub fn external<'a>(&'a self, config_external: &'a [String]) -> Vec<String> {
+        config_external
+            .iter()
+            .chain(&self.external)
+            .cloned()
+            .collect()
+    }
+
     pub fn script_name(&self) -> String {
         self.name.clone().unwrap_or_else(|| {
             let file = self

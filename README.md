@@ -22,6 +22,7 @@ cargo install --path .          # installs `klsm`
 root = "../RessoMusic"          # the Script Sync folder (maps to `game`)
 minify = "none"                 # none | light | full
 regenerate_sourcemap = true     # rewrite sourcemap.json whenever it lags behind the folder
+external = ["ReplicatedStorage"] # modules here stay in the game instead of being bundled
 
 [[bundle]]
 entry  = "ServerScriptService/Server/Main.server.luau"
@@ -31,6 +32,7 @@ rbxmx  = "dist/Server.rbxmx"    # optional: drag-into-Studio model
 [[bundle]]
 entry  = "StarterPlayerScripts/Client/Main.local.luau"
 output = "dist/Client.local.luau"
+external = ["ReplicatedStorage.Packages"]   # per-bundle additions to the list above
 ```
 
 Single entry without a config: `klsm build --root ../RessoMusic --entry <file> -o out.luau`.
@@ -58,6 +60,15 @@ Studio only rewrites `sourcemap.json` when it feels like it, so it lags behind a
 adding scripts. `klsm sourcemap` (or `regenerate_sourcemap = true` / `--regenerate-sourcemap` on
 `build` and `watch`) writes the merged view back in Studio's format: scripts found on disk are
 added and entries whose file is gone are dropped, so tools like Luau LSP see the same tree.
+
+## External modules
+
+`external` (top level, per `[[bundle]]`, or `--external <path>`) lists instance paths, from `game`,
+whose ModuleScripts are left in the place rather than copied into the bundle. Every require that
+resolves under one of them is rewritten to an absolute path such as
+`require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("X"))`, because
+`script`-relative paths no longer work once the requiring module lives inside the bundle. Those
+modules are not walked, so whatever they require themselves is not bundled either.
 
 ## Runtime behaviour
 

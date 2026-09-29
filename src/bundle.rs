@@ -2,7 +2,7 @@
 
 use crate::analyze::{self, Aliases, Analysis, Target};
 use crate::minify::{Minify, glue, minify};
-use crate::tree::{NodeId, Tree};
+use crate::tree::{NodeId, Tree, lua_string};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -85,6 +85,8 @@ pub struct Bundle {
     pub map: SourceMap,
     pub diagnostics: Vec<Diagnostic>,
     pub module_count: usize,
+    /// Requires left pointing at modules in the game (see `Options::external`).
+    pub external_count: usize,
     /// Every source file that went in, for watch mode.
     pub inputs: Vec<String>,
 }
@@ -111,6 +113,9 @@ pub struct Options<'a> {
     pub entry: NodeId,
     pub minify: Minify,
     pub script_name: String,
+    /// Instance paths (`ReplicatedStorage`, `ReplicatedStorage.Packages`) whose modules stay
+    /// in the game: requires of them are rewritten to absolute paths instead of bundled.
+    pub external: &'a [String],
 }
 
 pub fn bundle(opts: &Options) -> Bundle {
@@ -136,6 +141,7 @@ pub fn bundle(opts: &Options) -> Bundle {
     let mut order: Vec<NodeId> = vec![opts.entry];
     let mut seen: HashMap<NodeId, usize> = HashMap::from([(opts.entry, 0)]);
     let id_shift = usize::from(entry.is_module());
+    let mut external_count = 0;
 
     while units.len() < order.len() {
         let index = units.len();
@@ -185,6 +191,8 @@ pub fn bundle(opts: &Options) -> Bundle {
                                 tree.full_name(*target)
                             ),
                         ));
+                    } else if tree.is_under(*target, opts.external) {
+                        external_count += 1;
                     } else if t.file.is_none() {
                         diags.push(error(
                             &file,
@@ -270,6 +278,7 @@ pub fn bundle(opts: &Options) -> Bundle {
         },
         diagnostics: diags,
         module_count: id_of.len(),
+        external_count,
         inputs: units.iter().map(|u| u.file.clone()).collect(),
     }
 }
@@ -355,31 +364,27 @@ fn report_cycles(
     }
 }
 
-fn lua_string(s: &str) -> String {
-    let mut out = String::from("\"");
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            c if (c as u32) < 32 => out.push_str(&format!("\\{:03}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
 /// Rewrites resolved requires and strips `export` from type declarations, keeping
 /// the line count of every replaced span so the source map stays exact.
-fn rewrite(unit: &Unit, tree: &Tree, id_of: &HashMap<NodeId, usize>, annotate: bool) -> String {
+fn rewrite(unit: &Unit, tree: &Tree, id_of: &HashMap<NodeId, usize>, opts: &Options) -> String {
+    let annotate = opts.minify == Minify::None;
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
     for site in unit.analysis.requires.iter().filter(|r| !r.never_runs) {
         let Target::Node(n) = site.target else {
             continue;
         };
-        let Some(id) = id_of.get(&n) else { continue };
         let pad = "\n".repeat(site.text.matches('\n').count());
+        let Some(id) = id_of.get(&n) else {
+            // External module: `script`-relative paths mean nothing inside the bundle,
+            // so point at the real instance from `game`.
+            if tree.is_under(n, opts.external) && tree.node(n).is_module() {
+                edits.push((
+                    site.range.clone(),
+                    format!("require({}){pad}", tree.runtime_path(n)),
+                ));
+            }
+            continue;
+        };
         let text = if annotate {
             format!(
                 "__KLSM_require({id} --[[{}]]){pad}",
@@ -464,7 +469,7 @@ fn emit(
     modules.sort_by_key(|u| u.id);
     for unit in modules {
         let id = unit.id.unwrap();
-        let body = squash(&rewrite(unit, tree, id_of, annotate), &unit.file);
+        let body = squash(&rewrite(unit, tree, id_of, opts), &unit.file);
         let proxy = if unit.analysis.script_uses.is_empty() {
             String::new()
         } else {
@@ -501,7 +506,7 @@ fn emit(
     if let Some(id) = entry.id {
         glue(&mut out, &format!("return __KLSM_require({id})\n"));
     } else {
-        let body = squash(&rewrite(entry, tree, id_of, annotate), &entry.file);
+        let body = squash(&rewrite(entry, tree, id_of, opts), &entry.file);
         if annotate {
             out.push_str(&format!("do -- {}\n", entry.file));
         } else {

@@ -83,6 +83,9 @@ struct BuildArgs {
     /// (same as `regenerate_sourcemap = true` in the config).
     #[arg(long)]
     regenerate_sourcemap: bool,
+    /// Instance path whose modules stay in the game (repeatable), e.g. ReplicatedStorage.
+    #[arg(long, value_name = "PATH")]
+    external: Vec<String>,
 }
 
 impl BuildArgs {
@@ -93,12 +96,14 @@ impl BuildArgs {
                 sourcemap: None,
                 regenerate_sourcemap: self.regenerate_sourcemap,
                 minify: self.minify.unwrap_or_default(),
+                external: self.external.clone(),
                 bundles: vec![Target {
                     entry: entry.clone(),
                     output: output.clone(),
                     rbxmx: self.rbxmx.clone(),
                     minify: None,
                     name: None,
+                    external: Vec::new(),
                 }],
             });
         }
@@ -112,6 +117,7 @@ impl BuildArgs {
             config.bundles.iter_mut().for_each(|b| b.minify = None);
         }
         config.regenerate_sourcemap |= self.regenerate_sourcemap;
+        config.external.extend(self.external.iter().cloned());
         Ok(config)
     }
 }
@@ -240,7 +246,8 @@ fn build_all(config: &Config, strict: bool) -> Result<bool> {
     let mut ok = true;
     for target in &config.bundles {
         let started = Instant::now();
-        let bundle = build_target(&tree, &aliases, target, config.minify)
+        let external = target.external(&config.external);
+        let bundle = build_target(&tree, &aliases, target, config.minify, &external)
             .with_context(|| format!("bundling {}", target.entry.display()))?;
         for d in &bundle.diagnostics {
             eprintln!("{d}");
@@ -254,8 +261,13 @@ fn build_all(config: &Config, strict: bool) -> Result<bool> {
             ok = false;
             eprintln!("✗ {} — not written", target.entry.display());
         } else {
+            let external = if bundle.external_count > 0 {
+                format!(", {} external", bundle.external_count)
+            } else {
+                String::new()
+            };
             eprintln!(
-                "✓ {} → {} ({} modules, {} KB, {warnings} warnings, {} ms)",
+                "✓ {} → {} ({} modules{external}, {} KB, {warnings} warnings, {} ms)",
                 target.entry.display(),
                 target.output.display(),
                 bundle.module_count,

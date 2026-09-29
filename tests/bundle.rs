@@ -16,6 +16,7 @@ fn build(fixture: &str, entry: &str, minify: Minify) -> Bundle {
         entry,
         minify,
         script_name: "Bundle".into(),
+        external: &[],
     })
 }
 
@@ -199,6 +200,7 @@ fn real_project() {
                 entry,
                 minify,
                 script_name: "B".into(),
+                external: &[],
             })
         };
         let plain = make(Minify::None);
@@ -277,6 +279,7 @@ fn luaurc_aliases_resolve() {
         entry,
         minify: Minify::None,
         script_name: "B".into(),
+        external: &[],
     });
     assert!(
         !b.has_errors() && b.diagnostics.is_empty(),
@@ -364,4 +367,45 @@ fn regenerated_sourcemap_matches_disk() {
     let json = fresh.sourcemap_json();
     assert!(json.starts_with("{\n  \"name\": \"Game\""));
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn external_modules_stay_in_the_game() {
+    let tree = Tree::load(Path::new("tests/fixtures/basic"), None).unwrap();
+    let entry = tree
+        .find_file(Path::new("ReplicatedStorage/Shared/Suite.luau"))
+        .unwrap();
+    let external = [
+        "ReplicatedStorage/Pkg".to_string(),
+        "game.ReplicatedStorage.Shared.Lazy".to_string(),
+    ];
+    let b = bundle::bundle(&Options {
+        tree: &tree,
+        aliases: &Aliases::new(),
+        entry,
+        minify: Minify::None,
+        script_name: "Bundle".into(),
+        external: &external,
+    });
+    assert!(!b.has_errors(), "{}", diagnostics(&b));
+    // Pkg (with its lib), Lazy.A and Lazy.B are no longer bundled (10 -> 6).
+    assert_eq!(b.module_count, 6);
+    assert_eq!(b.external_count, 3);
+    assert!(
+        b.code
+            .contains("require(game:GetService(\"ReplicatedStorage\"):WaitForChild(\"Pkg\"))")
+    );
+    assert!(b.code.contains(
+        "require(game:GetService(\"ReplicatedStorage\"):WaitForChild(\"Shared\"):WaitForChild(\"Lazy\"):WaitForChild(\"A\"))"
+    ));
+    assert!(
+        !b.inputs
+            .iter()
+            .any(|f| f.contains("Pkg") || f.contains("Lazy"))
+    );
+    assert!(
+        full_moon::parse_fallible(&b.code, LuaVersion::luau())
+            .errors()
+            .is_empty()
+    );
 }
