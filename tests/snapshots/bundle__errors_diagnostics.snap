@@ -1,0 +1,9 @@
+---
+source: tests/bundle.rs
+expression: diagnostics(&b)
+---
+error: ReplicatedStorage/Bad.luau:1: expected an expression
+error: ReplicatedStorage/Bad.luau:1: unexpected token, this needs to be a statement
+error: ServerScriptService/Main.server.luau:2: require(script.Parent.Other) resolves to Script ServerScriptService.Other; only ModuleScripts can be required
+warning: ServerScriptService/Main.server.luau:3: require(ReplicatedStorage[math.random() > 2 and "A" or "B"]) is not statically resolvable; left as a real require
+warning: ServerScriptService/Main.server.luau:4: cannot resolve require(ReplicatedStorage.DoesNotExist): ReplicatedStorage has no child "DoesNotExist"; left as a real require (errors if it runs)

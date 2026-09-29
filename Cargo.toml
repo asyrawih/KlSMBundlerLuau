@@ -1,0 +1,22 @@
+[package]
+name = "klsm-bundler"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+full_moon = { version = "2.2.0", features = ["luau"] }
+globset = "0.4.20"
+notify = "8.2.0"
+regex = "1.13.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+toml = "1.1.6"
+
+[dev-dependencies]
+insta = "1.48.0"
+
+[[bin]]
+name = "klsm"
+path = "src/main.rs"

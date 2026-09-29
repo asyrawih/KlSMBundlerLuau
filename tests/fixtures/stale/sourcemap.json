@@ -1,0 +1,5 @@
+{ "name": "Game", "className": "DataModel", "filePaths": [], "children": [
+  { "name": "ReplicatedStorage", "className": "ReplicatedStorage", "filePaths": [], "children": [
+    { "name": "Old", "className": "ModuleScript", "filePaths": ["ReplicatedStorage/Old.luau"], "children": [] }
+  ] }
+] }

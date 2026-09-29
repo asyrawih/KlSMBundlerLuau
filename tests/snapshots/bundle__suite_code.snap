@@ -1,0 +1,192 @@
+---
+source: tests/bundle.rs
+expression: b.code
+---
+--!nocheck
+-- Bundled by KlSMBundlerLuau 0.1.0 from ReplicatedStorage/Shared/Suite.luau (10 modules). Generated file: edit the sources, not this.
+local __KLSM_modules = {}
+local __KLSM_names = {}
+local __KLSM_cache = {}
+local __KLSM_LOADING, __KLSM_FAILED = {}, {}
+
+local function __KLSM_require(id)
+	local cached = __KLSM_cache[id]
+	if cached == __KLSM_LOADING then
+		error("Requested module was required recursively: " .. __KLSM_names[id], 2)
+	elseif cached == __KLSM_FAILED then
+		error("Requested module experienced an error while loading: " .. __KLSM_names[id], 2)
+	elseif cached ~= nil then
+		return cached[1]
+	end
+	__KLSM_cache[id] = __KLSM_LOADING
+	local ok, results = xpcall(function()
+		return table.pack(__KLSM_modules[id]())
+	end, function(err)
+		return err
+	end)
+	if not ok then
+		__KLSM_cache[id] = __KLSM_FAILED
+		error(results, 0)
+	end
+	if results.n ~= 1 then
+		__KLSM_cache[id] = __KLSM_FAILED
+		error("Module code did not return exactly one value: " .. __KLSM_names[id], 2)
+	end
+	__KLSM_cache[id] = { results[1] }
+	return results[1]
+end
+
+-- Stand-in for `script` inside bundled modules: the original ModuleScript no longer
+-- exists at runtime, so only its name and path survive.
+local __KLSM_Script = {}
+local function __KLSM_ref(segments)
+	return setmetatable({ __segments = segments }, __KLSM_Script)
+end
+local function __KLSM_child(self, name)
+	local segments = table.clone(rawget(self, "__segments"))
+	table.insert(segments, name)
+	return __KLSM_ref(segments)
+end
+local __KLSM_methods = {
+	WaitForChild = __KLSM_child,
+	FindFirstChild = __KLSM_child,
+	GetFullName = function(self)
+		return table.concat(rawget(self, "__segments"), ".")
+	end,
+}
+__KLSM_Script.__index = function(self, key)
+	local segments = rawget(self, "__segments")
+	if key == "Name" then
+		return segments[#segments]
+	elseif key == "Parent" then
+		local parent = table.clone(segments)
+		table.remove(parent)
+		return __KLSM_ref(parent)
+	elseif key == "ClassName" then
+		return "ModuleScript"
+	elseif __KLSM_methods[key] then
+		return __KLSM_methods[key]
+	end
+	return __KLSM_child(self, key)
+end
+__KLSM_Script.__tostring = function(self)
+	local segments = rawget(self, "__segments")
+	return segments[#segments] or "game"
+end
+local __KLSM_script = __KLSM_ref
+__KLSM_names[1] = "ReplicatedStorage.Shared.Suite"
+__KLSM_modules[1] = function(...) -- ReplicatedStorage/Shared/Suite.luau
+-- ModuleScript entry used by the runtime test: returns everything it observed.
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+
+local Greeter = __KLSM_require(2 --[[ReplicatedStorage.Shared.Greeter]])
+local Helper = __KLSM_require(3 --[[ReplicatedStorage.Shared.Helper]])
+local Pkg = __KLSM_require(4 --[[ReplicatedStorage.Pkg]])
+
+
+local A = __KLSM_require(5 --[[ReplicatedStorage.Shared.Lazy.A]])
+local B = __KLSM_require(6 --[[ReplicatedStorage.Shared.Lazy.B]])
+local Twice1 = __KLSM_require(7 --[[ReplicatedStorage.Shared.Twice]])
+local Twice2 = __KLSM_require(7 --[[ReplicatedStorage.Shared.Twice]])
+
+type G = typeof(require(Shared.Greeter))
+
+local brokenOk, brokenErr = pcall(function()
+	return __KLSM_require(8 --[[ReplicatedStorage.Shared.Broken]])
+end)
+
+return {
+	greet = Greeter.greet("roblox"),
+	name = Greeter.name,
+	parentName = Greeter.parentName,
+	sameModule = Greeter.sameModule,
+	helper = Helper(21),
+	pkg = Pkg.version,
+	aPartner = A.partner(),
+	bPartner = B.partner(),
+	cached = Twice1 == Twice2 and Twice1.loads == 1,
+	brokenOk = brokenOk,
+	brokenErr = tostring(brokenErr),
+}
+end
+__KLSM_names[2] = "ReplicatedStorage.Shared.Greeter"
+__KLSM_modules[2] = function(...) local script = __KLSM_script({"ReplicatedStorage", "Shared", "Greeter"}) -- ReplicatedStorage/Shared/Greeter.luau
+local Counter = __KLSM_require(9 --[[ReplicatedStorage.Shared.Util.Counter]])
+local Util = script.Parent.Util -- alias used only for a require below
+local Again = __KLSM_require(9 --[[ReplicatedStorage.Shared.Util.Counter]])
+
+local Greeter = {}
+Greeter.name = script.Name
+Greeter.parentName = script.Parent.Name
+Greeter.sameModule = Counter == Again
+
+function Greeter.greet(who: string): string
+	local c = Counter.new()
+	Counter.bump(c)
+	return `hello {who} #{c.value}`
+end
+
+return Greeter
+end
+__KLSM_names[3] = "ReplicatedStorage.Shared.Helper"
+__KLSM_modules[3] = function(...) -- ReplicatedStorage/Shared/Helper.luau
+return function(x) return x * 2 end
+end
+__KLSM_names[4] = "ReplicatedStorage.Pkg"
+__KLSM_modules[4] = function(...) -- ReplicatedStorage/Pkg/init.luau
+local lib = __KLSM_require(10 --[[ReplicatedStorage.Pkg.lib]])
+ type Lib = typeof(lib)
+return lib
+end
+__KLSM_names[5] = "ReplicatedStorage.Shared.Lazy.A"
+__KLSM_modules[5] = function(...) -- ReplicatedStorage/Shared/Lazy/A.luau
+local B = __KLSM_require(6 --[[ReplicatedStorage.Shared.Lazy.B]])
+return {
+	name = "A",
+	partner = function()
+		return B.name
+	end,
+}
+end
+__KLSM_names[6] = "ReplicatedStorage.Shared.Lazy.B"
+__KLSM_modules[6] = function(...) -- ReplicatedStorage/Shared/Lazy/B.luau
+local B = { name = "B" }
+function B.partner()
+	return __KLSM_require(5 --[[ReplicatedStorage.Shared.Lazy.A]]).name -- lazy: fine at runtime
+end
+return B
+end
+__KLSM_names[7] = "ReplicatedStorage.Shared.Twice"
+__KLSM_modules[7] = function(...) -- ReplicatedStorage/Shared/Twice.luau
+local n = 0
+n += 1
+return { loads = n }
+end
+__KLSM_names[8] = "ReplicatedStorage.Shared.Broken"
+__KLSM_modules[8] = function(...) -- ReplicatedStorage/Shared/Broken.luau
+local nothing = 1
+end
+__KLSM_names[9] = "ReplicatedStorage.Shared.Util.Counter"
+__KLSM_modules[9] = function(...) -- ReplicatedStorage/Shared/Util/Counter.luau
+--!strict
+ type Counter = { value: number }
+
+local Counter = {}
+
+function Counter.new(): Counter
+	return { value = 0 }
+end
+
+function Counter.bump(c: Counter): number
+	c.value += 1
+	return c.value
+end
+
+return Counter
+end
+__KLSM_names[10] = "ReplicatedStorage.Pkg.lib"
+__KLSM_modules[10] = function(...) -- ReplicatedStorage/Pkg/lib.luau
+return { version = "1.0" }
+end
+return __KLSM_require(1)

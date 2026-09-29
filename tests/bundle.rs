@@ -1,0 +1,294 @@
+use full_moon::LuaVersion;
+use full_moon::tokenizer::{Lexer, TokenType};
+use klsm_bundler::analyze::Aliases;
+use klsm_bundler::bundle::{self, Bundle, Level, Options};
+use klsm_bundler::minify::Minify;
+use klsm_bundler::trace;
+use klsm_bundler::tree::Tree;
+use std::path::Path;
+
+fn build(fixture: &str, entry: &str, minify: Minify) -> Bundle {
+    let tree = Tree::load(&Path::new("tests/fixtures").join(fixture), None).unwrap();
+    let entry = tree.find_file(Path::new(entry)).unwrap();
+    bundle::bundle(&Options {
+        tree: &tree,
+        aliases: &Aliases::new(),
+        entry,
+        minify,
+        script_name: "Bundle".into(),
+    })
+}
+
+fn diagnostics(b: &Bundle) -> String {
+    b.diagnostics.iter().map(|d| format!("{d}\n")).collect()
+}
+
+/// Non-trivia tokens, ignoring the `--[[path]]` annotations the unminified output adds.
+fn code_tokens(code: &str) -> Vec<String> {
+    Lexer::new(code, LuaVersion::luau())
+        .collect()
+        .unwrap()
+        .iter()
+        .filter(|t| !t.token_type().is_trivia() && !matches!(t.token_type(), TokenType::Eof))
+        .map(|t| t.to_string())
+        .collect()
+}
+
+#[test]
+fn module_entry_bundle() {
+    let b = build("basic", "ReplicatedStorage/Shared/Suite.luau", Minify::None);
+    assert!(!b.has_errors(), "{}", diagnostics(&b));
+    assert_eq!(b.module_count, 10);
+    assert!(
+        full_moon::parse_fallible(&b.code, LuaVersion::luau())
+            .errors()
+            .is_empty()
+    );
+    insta::assert_snapshot!("suite_diagnostics", diagnostics(&b));
+    insta::assert_snapshot!("suite_code", b.code);
+}
+
+#[test]
+fn script_entry_bundle() {
+    let b = build(
+        "basic",
+        "ServerScriptService/Server/Main.server.luau",
+        Minify::None,
+    );
+    assert!(!b.has_errors(), "{}", diagnostics(&b));
+    // Only what Main reaches: Greeter and Counter.
+    assert_eq!(b.module_count, 2);
+    assert!(
+        b.code
+            .contains("do -- ServerScriptService/Server/Main.server.luau")
+    );
+    insta::assert_snapshot!("main_code", b.code);
+}
+
+#[test]
+fn type_only_requires_are_not_bundled() {
+    let b = build("basic", "ReplicatedStorage/Shared/Suite.luau", Minify::None);
+    assert!(b.code.contains("type G = typeof(require(Shared.Greeter))"));
+}
+
+#[test]
+fn exports_are_stripped_inside_modules() {
+    let b = build("basic", "ReplicatedStorage/Shared/Suite.luau", Minify::None);
+    assert!(!b.code.contains("export type"));
+}
+
+#[test]
+fn minified_output_has_identical_tokens() {
+    let plain = build("basic", "ReplicatedStorage/Shared/Suite.luau", Minify::None);
+    let plain_tokens = code_tokens(&plain.code);
+    for level in [Minify::Light, Minify::Full] {
+        let min = build("basic", "ReplicatedStorage/Shared/Suite.luau", level);
+        assert!(min.code.len() < plain.code.len());
+        assert!(
+            full_moon::parse_fallible(&min.code, LuaVersion::luau())
+                .errors()
+                .is_empty(),
+            "{level:?}"
+        );
+        assert_eq!(code_tokens(&min.code), plain_tokens, "{level:?}");
+    }
+}
+
+#[test]
+fn light_minify_keeps_line_numbers() {
+    let plain = build("basic", "ReplicatedStorage/Shared/Suite.luau", Minify::None);
+    let light = build(
+        "basic",
+        "ReplicatedStorage/Shared/Suite.luau",
+        Minify::Light,
+    );
+    let find = |b: &Bundle| {
+        b.code
+            .lines()
+            .position(|l| l.contains("`hello {who}"))
+            .unwrap()
+            + 1
+    };
+    for b in [&plain, &light] {
+        let (seg, line) = b.map.lookup(find(b)).unwrap();
+        assert_eq!(
+            (seg.file.as_str(), line),
+            ("ReplicatedStorage/Shared/Greeter.luau", 13)
+        );
+    }
+}
+
+#[test]
+fn trace_rewrites_error_lines() {
+    let b = build("basic", "ReplicatedStorage/Shared/Suite.luau", Minify::None);
+    let line = b
+        .code
+        .lines()
+        .position(|l| l.contains("c.value += 1"))
+        .unwrap()
+        + 1;
+    let log = format!("ServerScriptService.Bundle:{line}: attempt to index nil\n");
+    assert_eq!(
+        trace::rewrite(&b.map, &log),
+        "ReplicatedStorage/Shared/Util/Counter.luau:11: attempt to index nil\n"
+    );
+}
+
+#[test]
+fn reports_errors_and_warnings() {
+    let b = build(
+        "errors",
+        "ServerScriptService/Main.server.luau",
+        Minify::None,
+    );
+    assert!(b.has_errors());
+    let errors: Vec<_> = b
+        .diagnostics
+        .iter()
+        .filter(|d| d.level == Level::Error)
+        .collect();
+    assert_eq!(errors.len(), 3);
+    insta::assert_snapshot!("errors_diagnostics", diagnostics(&b));
+}
+
+#[test]
+fn stale_sourcemap_is_patched_from_disk() {
+    let tree = Tree::load(Path::new("tests/fixtures/stale"), None).unwrap();
+    assert_eq!(
+        tree.stale_files,
+        vec!["ReplicatedStorage/New.luau".to_string()]
+    );
+    let b = build("stale", "ReplicatedStorage/Old.luau", Minify::None);
+    assert!(!b.has_errors(), "{}", diagnostics(&b));
+    assert_eq!(b.module_count, 2);
+}
+
+/// Runs against a real Script Sync project: `KLSM_REAL_PROJECT=../RessoMusic cargo test real_project`.
+#[test]
+fn real_project_minifies_losslessly() {
+    std::thread::Builder::new()
+        .stack_size(256 << 20)
+        .spawn(real_project)
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+fn real_project() {
+    let Ok(root) = std::env::var("KLSM_REAL_PROJECT") else {
+        return;
+    };
+    let tree = Tree::load(Path::new(&root), None).unwrap();
+    for entry in [
+        "ServerScriptService/Server/Main.server.luau",
+        "StarterPlayerScripts/Client/Main.local.luau",
+    ] {
+        let Ok(entry) = tree.find_file(Path::new(entry)) else {
+            continue;
+        };
+        let make = |minify| {
+            bundle::bundle(&Options {
+                tree: &tree,
+                aliases: &Aliases::new(),
+                entry,
+                minify,
+                script_name: "B".into(),
+            })
+        };
+        let plain = make(Minify::None);
+        assert!(!plain.has_errors(), "{}", diagnostics(&plain));
+        let tokens = code_tokens(&plain.code);
+        for level in [Minify::Light, Minify::Full] {
+            let min = make(level);
+            assert!(
+                full_moon::parse_fallible(&min.code, LuaVersion::luau())
+                    .errors()
+                    .is_empty()
+            );
+            assert_eq!(code_tokens(&min.code), tokens, "{level:?}");
+            eprintln!(
+                "{level:?}: {} KB -> {} KB",
+                plain.code.len() / 1024,
+                min.code.len() / 1024
+            );
+        }
+    }
+}
+
+/// Executes the Suite bundle with the Luau CLI: `LUAU_BIN=/path/to/luau cargo test runs_under_luau`.
+#[test]
+fn runs_under_luau() {
+    let Ok(luau) = std::env::var("LUAU_BIN") else {
+        return;
+    };
+    for level in [Minify::None, Minify::Light, Minify::Full] {
+        let b = build("basic", "ReplicatedStorage/Shared/Suite.luau", level);
+        let script = format!(
+            "game = {{ GetService = function() return {{ WaitForChild = function() return {{}} end }} end }}\n\
+             local r = (function()\n{}\nend)()\n\
+             print(r.greet, r.name, r.parentName, r.sameModule, r.helper, r.pkg, r.aPartner, r.bPartner, r.cached, r.brokenOk)\n\
+             print(r.brokenErr)\n",
+            b.code
+        );
+        let dir = std::env::temp_dir().join(format!("klsm-test-{}-{level:?}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("suite.luau");
+        std::fs::write(&file, script).unwrap();
+        let out = std::process::Command::new(&luau)
+            .arg(&file)
+            .output()
+            .unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "{level:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let mut lines = stdout.lines();
+        assert_eq!(
+            lines.next().unwrap(),
+            "hello roblox #1\tGreeter\tShared\ttrue\t42\t1.0\tB\tA\ttrue\tfalse",
+            "{level:?}"
+        );
+        assert!(lines.next().unwrap().ends_with(
+            "Module code did not return exactly one value: ReplicatedStorage.Shared.Broken"
+        ));
+    }
+}
+
+#[test]
+fn luaurc_aliases_resolve() {
+    let root = Path::new("tests/fixtures/alias");
+    let tree = Tree::load(root, None).unwrap();
+    let aliases = klsm_bundler::config::load_aliases(&tree.root_dir).unwrap();
+    let entry = tree
+        .find_file(Path::new("ServerScriptService/Main.server.luau"))
+        .unwrap();
+    let b = bundle::bundle(&Options {
+        tree: &tree,
+        aliases: &aliases,
+        entry,
+        minify: Minify::None,
+        script_name: "B".into(),
+    });
+    assert!(
+        !b.has_errors() && b.diagnostics.is_empty(),
+        "{}",
+        diagnostics(&b)
+    );
+    assert!(
+        b.code
+            .contains("print(__KLSM_require(1 --[[ReplicatedStorage.Shared.Util]]))")
+    );
+}
+
+#[test]
+fn game_guarded_fallbacks_are_ignored() {
+    let b = build("guard", "ReplicatedStorage/Lib.luau", Minify::None);
+    assert!(b.diagnostics.is_empty(), "{}", diagnostics(&b));
+    assert_eq!(b.module_count, 1);
+    // Left untouched: it only runs outside Roblox.
+    assert!(b.code.contains(r#"require "../test/mock".Enum"#));
+    assert!(b.code.contains("require(script.Missing)"));
+}

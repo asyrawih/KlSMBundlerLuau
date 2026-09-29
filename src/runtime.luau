@@ -1,0 +1,71 @@
+local __KLSM_modules = {}
+local __KLSM_names = {}
+local __KLSM_cache = {}
+local __KLSM_LOADING, __KLSM_FAILED = {}, {}
+
+local function __KLSM_require(id)
+	local cached = __KLSM_cache[id]
+	if cached == __KLSM_LOADING then
+		error("Requested module was required recursively: " .. __KLSM_names[id], 2)
+	elseif cached == __KLSM_FAILED then
+		error("Requested module experienced an error while loading: " .. __KLSM_names[id], 2)
+	elseif cached ~= nil then
+		return cached[1]
+	end
+	__KLSM_cache[id] = __KLSM_LOADING
+	local ok, results = xpcall(function()
+		return table.pack(__KLSM_modules[id]())
+	end, function(err)
+		return err
+	end)
+	if not ok then
+		__KLSM_cache[id] = __KLSM_FAILED
+		error(results, 0)
+	end
+	if results.n ~= 1 then
+		__KLSM_cache[id] = __KLSM_FAILED
+		error("Module code did not return exactly one value: " .. __KLSM_names[id], 2)
+	end
+	__KLSM_cache[id] = { results[1] }
+	return results[1]
+end
+
+--@@SCRIPT_PROXY@@
+-- Stand-in for `script` inside bundled modules: the original ModuleScript no longer
+-- exists at runtime, so only its name and path survive.
+local __KLSM_Script = {}
+local function __KLSM_ref(segments)
+	return setmetatable({ __segments = segments }, __KLSM_Script)
+end
+local function __KLSM_child(self, name)
+	local segments = table.clone(rawget(self, "__segments"))
+	table.insert(segments, name)
+	return __KLSM_ref(segments)
+end
+local __KLSM_methods = {
+	WaitForChild = __KLSM_child,
+	FindFirstChild = __KLSM_child,
+	GetFullName = function(self)
+		return table.concat(rawget(self, "__segments"), ".")
+	end,
+}
+__KLSM_Script.__index = function(self, key)
+	local segments = rawget(self, "__segments")
+	if key == "Name" then
+		return segments[#segments]
+	elseif key == "Parent" then
+		local parent = table.clone(segments)
+		table.remove(parent)
+		return __KLSM_ref(parent)
+	elseif key == "ClassName" then
+		return "ModuleScript"
+	elseif __KLSM_methods[key] then
+		return __KLSM_methods[key]
+	end
+	return __KLSM_child(self, key)
+end
+__KLSM_Script.__tostring = function(self)
+	local segments = rawget(self, "__segments")
+	return segments[#segments] or "game"
+end
+local __KLSM_script = __KLSM_ref

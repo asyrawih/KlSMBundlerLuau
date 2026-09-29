@@ -1,0 +1,5 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Other = require(script.Parent.Other)
+local Dyn = require(ReplicatedStorage[math.random() > 2 and "A" or "B"])
+local Gone = require(ReplicatedStorage.DoesNotExist)
+local Bad = require(ReplicatedStorage.Bad)

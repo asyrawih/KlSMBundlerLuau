@@ -1,0 +1,6 @@
+---
+source: tests/bundle.rs
+expression: diagnostics(&b)
+---
+warning: ReplicatedStorage/Shared/Greeter.luau:6: `script` used at runtime (lines 6, 7); in the bundle it is a stand-in that only knows its Name, Parent and child paths
+warning: ReplicatedStorage/Shared/Lazy/A.luau: circular require A -> B -> A; fine only if one of these requires runs lazily
