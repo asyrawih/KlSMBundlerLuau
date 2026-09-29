@@ -3,11 +3,11 @@ root = "../RessoMusic"
 minify = "full"
 
 [[bundle]]
-entry  = "ServerStorage/Server/Main.server.luau"
+entry  = "ServerScriptService/Server/Main.server.luau"
 output = "dist/Server.server.luau"
 rbxmx  = "dist/Server.rbxmx"
 
 [[bundle]]
-entry  = "ServerStorage/Client/Main.local.luau"
+entry  = "StarterPlayerScripts/Client/Main.local.luau"
 output = "dist/Client.local.luau"
 rbxmx  = "dist/Client.rbxmx"

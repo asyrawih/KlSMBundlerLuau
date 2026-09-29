@@ -13,6 +13,9 @@ pub struct Config {
     pub root: PathBuf,
     /// Defaults to `<root>/sourcemap.json`; the folder layout is used if it's missing.
     pub sourcemap: Option<PathBuf>,
+    /// Rewrite the sourcemap from the folder layout whenever it's out of date.
+    #[serde(default)]
+    pub regenerate_sourcemap: bool,
     #[serde(default)]
     pub minify: Minify,
     #[serde(rename = "bundle", default)]
@@ -47,6 +50,13 @@ impl Target {
 }
 
 impl Config {
+    /// Where the sourcemap lives (and is regenerated to).
+    pub fn sourcemap_path(&self) -> PathBuf {
+        self.sourcemap
+            .clone()
+            .unwrap_or_else(|| self.root.join("sourcemap.json"))
+    }
+
     pub fn load(path: &Path) -> Result<Config> {
         let text =
             fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;

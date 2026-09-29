@@ -7,6 +7,7 @@ plus every ModuleScript it reaches through `require`.
 klsm build                      # every [[bundle]] in ./bundle.toml
 klsm watch                      # rebuild on every save
 klsm trace dist/Server.server.luau.map.json < error.log   # map bundle lines back to files
+klsm sourcemap                  # rewrite sourcemap.json from the folder layout
 ```
 
 ## Setup
@@ -20,6 +21,7 @@ cargo install --path .          # installs `klsm`
 ```toml
 root = "../RessoMusic"          # the Script Sync folder (maps to `game`)
 minify = "none"                 # none | light | full
+regenerate_sourcemap = true     # rewrite sourcemap.json whenever it lags behind the folder
 
 [[bundle]]
 entry  = "ServerScriptService/Server/Main.server.luau"
@@ -51,6 +53,11 @@ merged in from the folder layout (`.luau` ModuleScript, `.server.luau` Script, `
 LocalScript, `.client.luau` Script/Client, `init.*` = the folder's own script). StarterPlayerScripts
 and StarterCharacterScripts are placed under StarterPlayer as in the real DataModel.
 `klsm tree --root <folder>` prints what it sees.
+
+Studio only rewrites `sourcemap.json` when it feels like it, so it lags behind after moving or
+adding scripts. `klsm sourcemap` (or `regenerate_sourcemap = true` / `--regenerate-sourcemap` on
+`build` and `watch`) writes the merged view back in Studio's format: scripts found on disk are
+added and entries whose file is gone are dropped, so tools like Luau LSP see the same tree.
 
 ## Runtime behaviour
 

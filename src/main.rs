@@ -44,6 +44,19 @@ enum Command {
         #[arg(long)]
         sourcemap: Option<PathBuf>,
     },
+    /// Rewrite sourcemap.json from the folder layout (scripts Studio hasn't listed yet
+    /// are added, entries whose file is gone are dropped).
+    Sourcemap {
+        /// Config file (default: ./bundle.toml); its `root` and `sourcemap` are used.
+        #[arg(short, long, conflicts_with = "root")]
+        config: Option<PathBuf>,
+        /// Sync folder root, instead of a config.
+        #[arg(long)]
+        root: Option<PathBuf>,
+        /// Write here instead of over the existing sourcemap.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Args, Clone)]
@@ -66,6 +79,10 @@ struct BuildArgs {
     /// Treat warnings as errors.
     #[arg(long)]
     strict: bool,
+    /// Rewrite sourcemap.json from the folder layout when it's out of date
+    /// (same as `regenerate_sourcemap = true` in the config).
+    #[arg(long)]
+    regenerate_sourcemap: bool,
 }
 
 impl BuildArgs {
@@ -74,6 +91,7 @@ impl BuildArgs {
             return Ok(Config {
                 root: root.clone(),
                 sourcemap: None,
+                regenerate_sourcemap: self.regenerate_sourcemap,
                 minify: self.minify.unwrap_or_default(),
                 bundles: vec![Target {
                     entry: entry.clone(),
@@ -93,6 +111,7 @@ impl BuildArgs {
             config.minify = m;
             config.bundles.iter_mut().for_each(|b| b.minify = None);
         }
+        config.regenerate_sourcemap |= self.regenerate_sourcemap;
         Ok(config)
     }
 }
@@ -158,19 +177,65 @@ fn run() -> Result<bool> {
             print_tree(&tree, ROOT, 0);
             Ok(true)
         }
+        Command::Sourcemap {
+            config,
+            root,
+            output,
+        } => {
+            let (root, sourcemap) = match root {
+                Some(root) => (root.clone(), root.join("sourcemap.json")),
+                None => {
+                    let path = config.unwrap_or_else(|| PathBuf::from("bundle.toml"));
+                    let config = Config::load(&path)?;
+                    (config.root.clone(), config.sourcemap_path())
+                }
+            };
+            let tree = Tree::load(&root, Some(&sourcemap))?;
+            let target = output.unwrap_or(sourcemap);
+            let changed = tree.write_sourcemap(&target)?;
+            eprintln!(
+                "{} {} ({})",
+                if changed {
+                    "✓ wrote"
+                } else {
+                    "✓ up to date:"
+                },
+                target.display(),
+                sourcemap_summary(&tree)
+            );
+            Ok(true)
+        }
     }
+}
+
+fn sourcemap_summary(tree: &Tree) -> String {
+    format!(
+        "+{} from disk, -{} missing",
+        tree.stale_files.len(),
+        tree.missing_files.len()
+    )
 }
 
 /// Returns false if any target failed.
 fn build_all(config: &Config, strict: bool) -> Result<bool> {
     let tree = Tree::load(&config.root, config.sourcemap.as_deref())?;
     let aliases = config::load_aliases(&tree.root_dir)?;
-    if !tree.stale_files.is_empty() {
-        eprintln!(
-            "note: sourcemap.json is missing {} script(s) found on disk (e.g. {}); using the folder layout for them",
-            tree.stale_files.len(),
-            tree.stale_files[0]
-        );
+    if tree.is_stale() {
+        let sourcemap = config.sourcemap_path();
+        if config.regenerate_sourcemap && sourcemap.parent().is_some_and(|d| d.is_dir()) {
+            tree.write_sourcemap(&sourcemap)?;
+            eprintln!(
+                "note: regenerated {} ({})",
+                sourcemap.display(),
+                sourcemap_summary(&tree)
+            );
+        } else if !tree.stale_files.is_empty() {
+            eprintln!(
+                "note: sourcemap.json is missing {} script(s) found on disk (e.g. {}); using the folder layout for them (`klsm sourcemap` or `regenerate_sourcemap = true` fixes this)",
+                tree.stale_files.len(),
+                tree.stale_files[0]
+            );
+        }
     }
     let mut ok = true;
     for target in &config.bundles {

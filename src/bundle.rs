@@ -419,7 +419,11 @@ fn emit(
     let annotate = opts.minify == Minify::None;
     let full = opts.minify == Minify::Full;
     let exact = !full;
-    let (eq, nl) = if annotate { (" = ", "\n") } else { ("=", if full { "" } else { "\n" }) };
+    let (eq, nl) = if annotate {
+        (" = ", "\n")
+    } else {
+        ("=", if full { "" } else { "\n" })
+    };
     let mut squash = |text: &str, file: &str| match minify(text, opts.minify) {
         Ok(s) => s,
         Err(e) => {
@@ -450,7 +454,10 @@ fn emit(
         Some((core, _)) => core.to_string(),
         None => RUNTIME.to_string(),
     };
-    glue(&mut out, squash(&runtime, "<runtime>").trim_end_matches('\n'));
+    glue(
+        &mut out,
+        squash(&runtime, "<runtime>").trim_end_matches('\n'),
+    );
     out.push_str(nl);
 
     let mut modules: Vec<&Unit> = units.iter().filter(|u| u.id.is_some()).collect();
@@ -471,7 +478,10 @@ fn emit(
         };
         glue(
             &mut out,
-            &format!("__KLSM_names[{id}]{eq}{}", lua_string(&tree.full_name(unit.node))),
+            &format!(
+                "__KLSM_names[{id}]{eq}{}",
+                lua_string(&tree.full_name(unit.node))
+            ),
         );
         out.push_str(nl);
         let comment = if annotate {
@@ -479,7 +489,10 @@ fn emit(
         } else {
             String::new()
         };
-        glue(&mut out, &format!("__KLSM_modules[{id}]{eq}function(...){proxy}{comment}"));
+        glue(
+            &mut out,
+            &format!("__KLSM_modules[{id}]{eq}function(...){proxy}{comment}"),
+        );
         out.push_str(nl);
         push_body(&mut out, &mut segments, unit, tree, &body, exact);
         glue(&mut out, "end\n");

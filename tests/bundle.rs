@@ -4,7 +4,7 @@ use klsm_bundler::analyze::Aliases;
 use klsm_bundler::bundle::{self, Bundle, Level, Options};
 use klsm_bundler::minify::Minify;
 use klsm_bundler::trace;
-use klsm_bundler::tree::Tree;
+use klsm_bundler::tree::{ROOT, Tree};
 use std::path::Path;
 
 fn build(fixture: &str, entry: &str, minify: Minify) -> Bundle {
@@ -297,4 +297,71 @@ fn game_guarded_fallbacks_are_ignored() {
     // Left untouched: it only runs outside Roblox.
     assert!(b.code.contains(r#"require "../test/mock".Enum"#));
     assert!(b.code.contains("require(script.Missing)"));
+}
+
+#[test]
+fn regenerated_sourcemap_matches_disk() {
+    // Copy the stale fixture and add an entry whose file doesn't exist.
+    let dir = std::env::temp_dir().join(format!("klsm-sourcemap-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("ReplicatedStorage")).unwrap();
+    for f in ["Old.luau", "New.luau"] {
+        std::fs::copy(
+            Path::new("tests/fixtures/stale/ReplicatedStorage").join(f),
+            dir.join("ReplicatedStorage").join(f),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        dir.join("sourcemap.json"),
+        r#"{ "name": "Game", "className": "DataModel", "filePaths": [], "children": [
+          { "name": "ReplicatedStorage", "className": "ReplicatedStorage", "filePaths": [], "children": [
+            { "name": "Old", "className": "ModuleScript", "filePaths": ["ReplicatedStorage/Old.luau"], "children": [] },
+            { "name": "Gone", "className": "ModuleScript", "filePaths": ["ReplicatedStorage/Gone.luau"], "children": [] },
+            { "name": "Empty", "className": "Folder", "filePaths": [], "children": [] }
+          ] },
+          { "name": "StarterPlayer", "className": "StarterPlayer", "filePaths": [], "children": [
+            { "name": "StarterPlayerScripts", "className": "StarterPlayerScripts", "filePaths": [], "children": [] }
+          ] }
+        ] }"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("StarterPlayerScripts")).unwrap();
+    std::fs::write(
+        dir.join("StarterPlayerScripts/Main.local.luau"),
+        "print(1)\n",
+    )
+    .unwrap();
+
+    let stale = Tree::load(&dir, None).unwrap();
+    assert!(stale.is_stale());
+    assert_eq!(
+        stale.missing_files,
+        vec!["ReplicatedStorage/Gone.luau".to_string()]
+    );
+    assert!(stale.write_sourcemap(&dir.join("sourcemap.json")).unwrap());
+
+    let fresh = Tree::load(&dir, None).unwrap();
+    assert!(
+        !fresh.is_stale(),
+        "{:?} {:?}",
+        fresh.stale_files,
+        fresh.missing_files
+    );
+    assert!(!fresh.write_sourcemap(&dir.join("sourcemap.json")).unwrap());
+    let rs = fresh.child(ROOT, "ReplicatedStorage").unwrap();
+    assert!(fresh.child(rs, "New").is_some());
+    assert!(fresh.child(rs, "Gone").is_none());
+    assert!(
+        fresh.child(rs, "Empty").is_some(),
+        "instances without files are kept"
+    );
+    // StarterPlayerScripts is nested once, not duplicated by the disk merge.
+    let sp = fresh.child(ROOT, "StarterPlayer").unwrap();
+    assert_eq!(fresh.node(sp).children.len(), 1);
+    let sps = fresh.child(sp, "StarterPlayerScripts").unwrap();
+    assert!(fresh.child(sps, "Main").is_some());
+    let json = fresh.sourcemap_json();
+    assert!(json.starts_with("{\n  \"name\": \"Game\""));
+    std::fs::remove_dir_all(&dir).ok();
 }
