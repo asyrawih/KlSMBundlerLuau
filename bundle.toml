@@ -1,13 +1,13 @@
 # Sync folder = game. Paths below are relative to this file.
 root = "../RessoMusic"
-minify = "none"
+minify = "full"
 
 [[bundle]]
-entry  = "ServerScriptService/Server/Main.server.luau"
+entry  = "ServerStorage/Server/Main.server.luau"
 output = "dist/Server.server.luau"
 rbxmx  = "dist/Server.rbxmx"
 
 [[bundle]]
-entry  = "StarterPlayerScripts/Client/Main.local.luau"
+entry  = "ServerStorage/Client/Main.local.luau"
 output = "dist/Client.local.luau"
 rbxmx  = "dist/Client.rbxmx"

@@ -1,7 +1,7 @@
 //! Walks the require graph from an entry script and emits one self-contained file.
 
 use crate::analyze::{self, Aliases, Analysis, Target};
-use crate::minify::{Minify, minify};
+use crate::minify::{Minify, glue, minify};
 use crate::tree::{NodeId, Tree};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -413,7 +413,13 @@ fn emit(
     let entry = &units[0];
     let mut out = String::new();
     let mut segments = Vec::new();
-    let exact = opts.minify != Minify::Full;
+    // `none` keeps the file readable; `light`/`full` drop every comment and space the
+    // bundler adds itself, and `full` also drops the newlines between the module wrappers
+    // (one newline per module stays, so `klsm trace` can still name the module).
+    let annotate = opts.minify == Minify::None;
+    let full = opts.minify == Minify::Full;
+    let exact = !full;
+    let (eq, nl) = if annotate { (" = ", "\n") } else { ("=", if full { "" } else { "\n" }) };
     let mut squash = |text: &str, file: &str| match minify(text, opts.minify) {
         Ok(s) => s,
         Err(e) => {
@@ -428,11 +434,13 @@ fn emit(
             out.push_str(&format!("--!{d}\n"));
         }
     }
-    out.push_str(&format!(
-        "-- Bundled by KlSMBundlerLuau {VERSION} from {} ({} modules). Generated file: edit the sources, not this.\n",
-        entry.file,
-        id_of.len()
-    ));
+    if annotate {
+        out.push_str(&format!(
+            "-- Bundled by KlSMBundlerLuau {VERSION} from {} ({} modules). Generated file: edit the sources, not this.\n",
+            entry.file,
+            id_of.len()
+        ));
+    }
 
     let needs_proxy = units
         .iter()
@@ -442,12 +450,9 @@ fn emit(
         Some((core, _)) => core.to_string(),
         None => RUNTIME.to_string(),
     };
-    out.push_str(&squash(&runtime, "<runtime>"));
-    if !out.ends_with('\n') {
-        out.push('\n');
-    }
+    glue(&mut out, squash(&runtime, "<runtime>").trim_end_matches('\n'));
+    out.push_str(nl);
 
-    let annotate = opts.minify == Minify::None;
     let mut modules: Vec<&Unit> = units.iter().filter(|u| u.id.is_some()).collect();
     modules.sort_by_key(|u| u.id);
     for unit in modules {
@@ -461,31 +466,37 @@ fn emit(
                 .iter()
                 .map(|s| lua_string(s))
                 .collect();
-            format!(" local script = __KLSM_script({{{}}})", segs.join(", "))
+            let sep = if annotate { ", " } else { "," };
+            format!(" local script{eq}__KLSM_script({{{}}})", segs.join(sep))
         };
-        out.push_str(&format!(
-            "__KLSM_names[{id}] = {}\n",
-            lua_string(&tree.full_name(unit.node))
-        ));
+        glue(
+            &mut out,
+            &format!("__KLSM_names[{id}]{eq}{}", lua_string(&tree.full_name(unit.node))),
+        );
+        out.push_str(nl);
         let comment = if annotate {
             format!(" -- {}", unit.file)
         } else {
             String::new()
         };
-        out.push_str(&format!(
-            "__KLSM_modules[{id}] = function(...){proxy}{comment}\n"
-        ));
+        glue(&mut out, &format!("__KLSM_modules[{id}]{eq}function(...){proxy}{comment}"));
+        out.push_str(nl);
         push_body(&mut out, &mut segments, unit, tree, &body, exact);
-        out.push_str("end\n");
+        glue(&mut out, "end\n");
     }
 
     if let Some(id) = entry.id {
-        out.push_str(&format!("return __KLSM_require({id})\n"));
+        glue(&mut out, &format!("return __KLSM_require({id})\n"));
     } else {
         let body = squash(&rewrite(entry, tree, id_of, annotate), &entry.file);
-        out.push_str(&format!("do -- {}\n", entry.file));
+        if annotate {
+            out.push_str(&format!("do -- {}\n", entry.file));
+        } else {
+            glue(&mut out, "do");
+            out.push_str(nl);
+        }
         push_body(&mut out, &mut segments, entry, tree, &body, exact);
-        out.push_str("end\n");
+        glue(&mut out, "end\n");
     }
     (out, segments)
 }
@@ -499,11 +510,16 @@ fn push_body(
     exact: bool,
 ) {
     let out_start = out.matches('\n').count() + 1;
-    out.push_str(body);
-    if !body.ends_with('\n') {
-        out.push('\n');
-    }
-    let out_end = out.matches('\n').count();
+    let out_end = if exact {
+        out.push_str(body);
+        if !body.ends_with('\n') {
+            out.push('\n');
+        }
+        out.matches('\n').count()
+    } else {
+        glue(out, body.trim_end_matches('\n'));
+        out.matches('\n').count() + 1
+    };
     segments.push(Segment {
         file: unit.file.clone(),
         instance: tree.full_name(unit.node),

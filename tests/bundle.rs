@@ -182,7 +182,13 @@ fn real_project() {
     for entry in [
         "ServerScriptService/Server/Main.server.luau",
         "StarterPlayerScripts/Client/Main.local.luau",
+        "ServerScriptService/Server.server.luau",
+        "StarterPlayerScripts/Client.local.luau",
     ] {
+        // A stale sourcemap can still list a script that was moved or deleted.
+        if !Path::new(&root).join(entry).is_file() {
+            continue;
+        }
         let Ok(entry) = tree.find_file(Path::new(entry)) else {
             continue;
         };

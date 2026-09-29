@@ -76,7 +76,9 @@ and StarterCharacterScripts are placed under StarterPlayer as in the real DataMo
 ## Minify and source maps
 
 - `light` strips comments and indentation but keeps every newline, so line numbers stay exact.
-- `full` also joins lines; traces then resolve to the module only.
+- `full` also joins lines: after the `--!` directives each module is a single line (that one
+  newline per module is what lets traces still name the module). Only `none` keeps the
+  `-- Bundled by …` header and the per-module file comments.
 
 Every build writes `<output>.map.json`. `klsm trace <map> 352` prints the original file and line;
 without line numbers it rewrites a pasted Roblox log (`Server:352: …` and

@@ -5,7 +5,7 @@
 
 use anyhow::{Result, anyhow};
 use full_moon::LuaVersion;
-use full_moon::tokenizer::{Lexer, LexerResult, TokenType};
+use full_moon::tokenizer::{InterpolatedStringKind, Lexer, LexerResult, TokenType};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, clap::ValueEnum)]
@@ -21,19 +21,51 @@ fn is_word(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
+/// Symbol characters that can start or continue a multi-character operator
+/// (`..`, `==`, `~=`, `->`, `//`, `+=`, `::`, and `--` which would open a comment).
+/// `?`, `#` and `!` never combine, so they need no spacing.
 fn is_op(c: char) -> bool {
-    "+-*/%^#=<>~.:&|?!".contains(c)
+    "+-*/%^=<>~.:&|".contains(c)
 }
 
-fn needs_space(prev: char, next: char) -> bool {
+/// Whether `prev` and `next` would lex differently when written back to back.
+pub fn needs_space(prev: char, next: char) -> bool {
     (is_word(prev) && is_word(next))
         || (is_op(prev) && is_op(next))
-        // `t[ [[x]] ]`, and `{{` / `}}` are rejected inside interpolated strings.
+        // `t[ [[x]] ]`: `[[` would open a long string.
         || (prev == '[' && (next == '[' || next == '='))
-        || (prev == '{' && next == '{')
-        || (prev == '}' && next == '}')
         // `1 ..x` must not become the malformed number `1..x`.
         || (prev.is_ascii_digit() && next == '.')
+}
+
+/// Appends `text`, inserting one space only if the join would change the tokens.
+pub fn glue(out: &mut String, text: &str) {
+    if let (Some(prev), Some(next)) = (out.chars().next_back(), text.chars().next())
+        && needs_space(prev, next)
+    {
+        out.push(' ');
+    }
+    out.push_str(text);
+}
+
+fn opens_interpolation(t: &TokenType) -> bool {
+    matches!(
+        t,
+        TokenType::InterpolatedString {
+            kind: InterpolatedStringKind::Begin | InterpolatedStringKind::Middle,
+            ..
+        }
+    )
+}
+
+fn closes_interpolation(t: &TokenType) -> bool {
+    matches!(
+        t,
+        TokenType::InterpolatedString {
+            kind: InterpolatedStringKind::Middle | InterpolatedStringKind::End,
+            ..
+        }
+    )
 }
 
 pub fn minify(source: &str, level: Minify) -> Result<String> {
@@ -49,6 +81,7 @@ pub fn minify(source: &str, level: Minify) -> Result<String> {
     let keep_lines = level == Minify::Light;
     let mut out = String::with_capacity(source.len() / 2);
     let mut separated = false;
+    let mut prev_type: Option<&TokenType> = None;
     for token in &tokens {
         match token.token_type() {
             TokenType::Whitespace { characters } => {
@@ -65,17 +98,23 @@ pub fn minify(source: &str, level: Minify) -> Result<String> {
                 }
             }
             TokenType::Eof => {}
-            _ => {
+            token_type => {
                 let text = token.to_string();
                 if let (Some(prev), Some(next)) = (out.chars().next_back(), text.chars().next())
                     && separated
                     && prev != '\n'
-                    && needs_space(prev, next)
                 {
-                    out.push(' ');
+                    // `{{` and `}}` are escapes inside interpolated strings, so an expression
+                    // starting or ending with a brace must stay separated from the backtick parts.
+                    let interpolation = (next == '{' && prev_type.is_some_and(opens_interpolation))
+                        || (prev == '}' && closes_interpolation(token_type));
+                    if interpolation || needs_space(prev, next) {
+                        out.push(' ');
+                    }
                 }
                 out.push_str(&text);
                 separated = false;
+                prev_type = Some(token_type);
             }
         }
     }
