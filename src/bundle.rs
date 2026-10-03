@@ -4,7 +4,7 @@ use crate::analyze::{self, Aliases, Analysis, Target};
 use crate::minify::{Minify, glue, minify};
 use crate::tree::{NodeId, Tree, lua_string};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 
@@ -116,6 +116,68 @@ pub struct Options<'a> {
     /// Instance paths (`ReplicatedStorage`, `ReplicatedStorage.Packages`) whose modules stay
     /// in the game: requires of them are rewritten to absolute paths instead of bundled.
     pub external: &'a [String],
+    /// Paths under `external` that are bundled anyway.
+    pub internal: &'a [String],
+    /// Globs of module files bundled even when nothing requires them statically; at
+    /// runtime they are reached through the `script` stand-in (`GetChildren`, `require`).
+    pub include: &'a [String],
+}
+
+impl Options<'_> {
+    fn is_external(&self, id: NodeId) -> bool {
+        self.tree.is_under(id, self.external) && !self.tree.is_under(id, self.internal)
+    }
+}
+
+/// Module nodes whose file matches one of `globs`, sorted by file.
+fn resolve_include(tree: &Tree, globs: &[String], diags: &mut Vec<Diagnostic>) -> Vec<NodeId> {
+    let mut found = Vec::new();
+    for pattern in globs {
+        let glob = match globset::GlobBuilder::new(&crate::tree::normalize(pattern))
+            .literal_separator(true)
+            .build()
+        {
+            Ok(g) => g.compile_matcher(),
+            Err(e) => {
+                diags.push(error(
+                    "bundle.toml",
+                    0,
+                    format!("bad include glob {pattern:?}: {e}"),
+                ));
+                continue;
+            }
+        };
+        let mut matched: Vec<(String, NodeId)> = tree
+            .nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(id, n)| n.file.as_ref().map(|f| (f.clone(), id)))
+            .filter(|(f, _)| glob.is_match(f))
+            .collect();
+        matched.sort();
+        if matched.is_empty() {
+            diags.push(warning(
+                "bundle.toml",
+                0,
+                format!("include {pattern:?} matches no script"),
+            ));
+        }
+        for (file, id) in matched {
+            if !tree.node(id).is_module() {
+                diags.push(error(
+                    &file,
+                    0,
+                    format!(
+                        "included by {pattern:?} but is a {}; only ModuleScripts can be included",
+                        tree.node(id).class_name
+                    ),
+                ));
+            } else if !found.contains(&id) {
+                found.push(id);
+            }
+        }
+    }
+    found
 }
 
 pub fn bundle(opts: &Options) -> Bundle {
@@ -142,6 +204,20 @@ pub fn bundle(opts: &Options) -> Bundle {
     let mut seen: HashMap<NodeId, usize> = HashMap::from([(opts.entry, 0)]);
     let id_shift = usize::from(entry.is_module());
     let mut external_count = 0;
+    for id in resolve_include(tree, opts.include, &mut diags) {
+        if opts.is_external(id) {
+            diags.push(warning(
+                tree.node(id).file.as_deref().unwrap_or_default(),
+                0,
+                "included but under `external`; list it in `internal` to bundle it".into(),
+            ));
+            continue;
+        }
+        seen.entry(id).or_insert_with(|| {
+            order.push(id);
+            order.len() - 1
+        });
+    }
 
     while units.len() < order.len() {
         let index = units.len();
@@ -177,80 +253,69 @@ pub fn bundle(opts: &Options) -> Bundle {
         analyze::attach_text(&unit.source, &mut unit.analysis);
 
         for site in unit.analysis.requires.iter().filter(|r| !r.never_runs) {
-            match &site.target {
-                Target::Node(target) => {
-                    let t = tree.node(*target);
-                    if !t.is_module() {
-                        diags.push(error(
-                            &file,
-                            site.line,
-                            format!(
-                                "{} resolves to {} {}; only ModuleScripts can be required",
-                                site.text,
-                                t.class_name,
-                                tree.full_name(*target)
-                            ),
-                        ));
-                    } else if tree.is_under(*target, opts.external) {
-                        external_count += 1;
-                    } else if t.file.is_none() {
-                        diags.push(error(
-                            &file,
-                            site.line,
-                            format!(
-                                "{} resolves to {}, which has no synced source file",
-                                site.text,
-                                tree.full_name(*target)
-                            ),
-                        ));
-                    } else {
-                        seen.entry(*target).or_insert_with(|| {
-                            order.push(*target);
-                            order.len() - 1
-                        });
-                        unit.deps.push(*target);
-                    }
-                }
+            let targets = match &site.target {
+                Target::Node(target) => vec![*target],
+                // Left as a real `require` call; the runtime routes stand-ins to the bundle.
+                Target::OneOf(targets) => targets.clone(),
                 // Roblox only fails a bad require when it runs, and guarded fallbacks
                 // (`game and Enum or require("../test/mock")`) never do.
-                Target::Missing(why) => diags.push(warning(
-                    &file,
-                    site.line,
-                    format!(
-                        "cannot resolve {}: {why}; left as a real require (errors if it runs)",
-                        site.text
-                    ),
-                )),
-                Target::Dynamic => diags.push(warning(
-                    &file,
-                    site.line,
-                    format!(
-                        "{} is not statically resolvable; left as a real require",
-                        site.text
-                    ),
-                )),
-                Target::Asset => {}
-            }
-        }
-        if !unit.analysis.script_uses.is_empty() {
-            let lines = unit
-                .analysis
-                .script_uses
-                .iter()
-                .map(|l| l.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let message = if id.is_some() {
-                format!(
-                    "`script` used at runtime (lines {lines}); in the bundle it is a stand-in that only knows its Name, Parent and child paths"
-                )
-            } else {
-                format!(
-                    "`script` used at runtime (lines {lines}); in the bundle it is the bundle Script, not {}",
-                    tree.full_name(node)
-                )
+                Target::Missing(why) => {
+                    diags.push(warning(
+                        &file,
+                        site.line,
+                        format!(
+                            "cannot resolve {}: {why}; left as a real require (errors if it runs)",
+                            site.text
+                        ),
+                    ));
+                    continue;
+                }
+                Target::Dynamic => {
+                    diags.push(warning(
+                        &file,
+                        site.line,
+                        format!(
+                            "{} is not statically resolvable; left as a real require",
+                            site.text
+                        ),
+                    ));
+                    continue;
+                }
+                Target::Asset => continue,
             };
-            diags.push(warning(&file, unit.analysis.script_uses[0], message));
+            for target in &targets {
+                let t = tree.node(*target);
+                if !t.is_module() {
+                    diags.push(error(
+                        &file,
+                        site.line,
+                        format!(
+                            "{} resolves to {} {}; only ModuleScripts can be required",
+                            site.text,
+                            t.class_name,
+                            tree.full_name(*target)
+                        ),
+                    ));
+                } else if opts.is_external(*target) {
+                    external_count += 1;
+                } else if t.file.is_none() {
+                    diags.push(error(
+                        &file,
+                        site.line,
+                        format!(
+                            "{} resolves to {}, which has no synced source file",
+                            site.text,
+                            tree.full_name(*target)
+                        ),
+                    ));
+                } else {
+                    seen.entry(*target).or_insert_with(|| {
+                        order.push(*target);
+                        order.len() - 1
+                    });
+                    unit.deps.push(*target);
+                }
+            }
         }
         units.push(unit);
     }
@@ -259,6 +324,45 @@ pub fn bundle(opts: &Options) -> Bundle {
         .iter()
         .filter_map(|u| u.id.map(|id| (u.node, id)))
         .collect();
+    // A `script` path is fine in a module when the stand-in can find bundled modules there.
+    let mut around_bundled = HashSet::new();
+    for &node in id_of.keys() {
+        let mut cur = Some(node);
+        while let Some(c) = cur.filter(|c| around_bundled.insert(*c)) {
+            cur = tree.node(c).parent;
+        }
+    }
+    for unit in &units {
+        let mut lines = unit.analysis.script_uses.clone();
+        lines.extend(
+            unit.analysis
+                .script_paths
+                .iter()
+                .filter(|(_, n)| unit.id.is_none() || !around_bundled.contains(n))
+                .map(|(l, _)| *l),
+        );
+        lines.sort();
+        lines.dedup();
+        let Some(&first) = lines.first() else {
+            continue;
+        };
+        let lines = lines
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let message = if unit.id.is_some() {
+            format!(
+                "`script` used at runtime (lines {lines}); in the bundle it is a stand-in that only knows its Name, Parent and the bundled modules around it"
+            )
+        } else {
+            format!(
+                "`script` used at runtime (lines {lines}); in the bundle it is the bundle Script, not {}",
+                tree.full_name(unit.node)
+            )
+        };
+        diags.push(warning(&unit.file, first, message));
+    }
     report_cycles(&units, tree, &id_of, &mut diags);
 
     let (code, segments) = emit(&units, opts, &id_of, &mut diags);
@@ -377,7 +481,7 @@ fn rewrite(unit: &Unit, tree: &Tree, id_of: &HashMap<NodeId, usize>, opts: &Opti
         let Some(id) = id_of.get(&n) else {
             // External module: `script`-relative paths mean nothing inside the bundle,
             // so point at the real instance from `game`.
-            if tree.is_under(n, opts.external) && tree.node(n).is_module() {
+            if opts.is_external(n) && tree.node(n).is_module() {
                 edits.push((
                     site.range.clone(),
                     format!("require({}){pad}", tree.runtime_path(n)),
@@ -453,7 +557,7 @@ fn emit(
 
     let needs_proxy = units
         .iter()
-        .any(|u| u.id.is_some() && !u.analysis.script_uses.is_empty());
+        .any(|u| u.id.is_some() && u.analysis.uses_script());
     let runtime = match RUNTIME.split_once(PROXY_MARKER) {
         Some((core, proxy)) if needs_proxy => format!("{core}{proxy}"),
         Some((core, _)) => core.to_string(),
@@ -470,7 +574,7 @@ fn emit(
     for unit in modules {
         let id = unit.id.unwrap();
         let body = squash(&rewrite(unit, tree, id_of, opts), &unit.file);
-        let proxy = if unit.analysis.script_uses.is_empty() {
+        let proxy = if !unit.analysis.uses_script() {
             String::new()
         } else {
             let segs: Vec<String> = tree

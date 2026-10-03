@@ -22,6 +22,10 @@ pub struct Config {
     /// (`["ReplicatedStorage"]`, `["ReplicatedStorage.Packages"]`).
     #[serde(default)]
     pub external: Vec<String>,
+    /// Instance paths bundled even though they sit under `external`
+    /// (`["ReplicatedStorage.AddonLoader"]`).
+    #[serde(default)]
+    pub internal: Vec<String>,
     #[serde(rename = "bundle", default)]
     pub bundles: Vec<Target>,
 }
@@ -41,6 +45,14 @@ pub struct Target {
     /// Added to the top-level `external` list for this bundle only.
     #[serde(default)]
     pub external: Vec<String>,
+    /// Added to the top-level `internal` list for this bundle only.
+    #[serde(default)]
+    pub internal: Vec<String>,
+    /// Globs of module files (relative to `root`) bundled even though nothing requires
+    /// them statically, e.g. `Addon/Server/Features/*/*Service.luau` for modules a loader
+    /// finds with `GetChildren()`.
+    #[serde(default)]
+    pub include: Vec<String>,
 }
 
 impl Target {
@@ -49,6 +61,15 @@ impl Target {
         config_external
             .iter()
             .chain(&self.external)
+            .cloned()
+            .collect()
+    }
+
+    /// The top-level and per-bundle internal paths together.
+    pub fn internal<'a>(&'a self, config_internal: &'a [String]) -> Vec<String> {
+        config_internal
+            .iter()
+            .chain(&self.internal)
             .cloned()
             .collect()
     }

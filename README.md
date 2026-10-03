@@ -48,6 +48,7 @@ own outputs. Remember to disable the original entry script if you do that, or bo
 | `script`-relative | `require(script.Parent.Foo)`, `require(script.lib)` |
 | Services & aliases | `local RS = game:GetService("ReplicatedStorage")` … `require(RS.Shared.X)` |
 | Lookups with literal names | `:WaitForChild("X")`, `:FindFirstChild("X")`, `["X"]`, `:FindFirstAncestor("X")` |
+| Loops over a table of paths | `for _, m in { Commands.A, Commands.B } do require(m) end` |
 | String requires | `require("./Foo")`, `require("../Foo")`, `require("@self/Foo")`, `.luaurc` aliases (`@shared/Foo`) |
 
 The instance tree comes from `sourcemap.json`; scripts on disk that the sourcemap doesn't list yet are
@@ -70,6 +71,30 @@ resolves under one of them is rewritten to an absolute path such as
 `script`-relative paths no longer work once the requiring module lives inside the bundle. Those
 modules are not walked, so whatever they require themselves is not bundled either.
 
+## Runtime loaders (`include` / `internal`)
+
+A loader that finds modules by scanning a folder (`for _, f in Features:GetChildren() do
+require(f[f.Name .. "Service"]) end`) can't be followed statically. `include` lists globs of module
+files (relative to `root`, `*` stops at `/`, `**` crosses folders) that are bundled anyway, together
+with everything they require:
+
+```toml
+internal = ["ReplicatedStorage.AddonLoader"]   # bundle these even though they sit under `external`
+
+[[bundle]]
+entry   = "ServerScriptService/Server/Main.server.luau"
+output  = "dist/Server.server.luau"
+include = ["Addon/Server/Features/*/*Service.luau"]
+```
+
+At runtime the `script` stand-in sees the bundled modules as an instance tree: `GetChildren`,
+`GetDescendants`, `FindFirstChild` (nil when nothing bundled is there), `IsA`, `ClassName`
+(`ModuleScript`, or `Folder` for the folders between them), and `require` of a stand-in loads the
+bundled module. The loader itself must run inside the bundle (a module left in the game calls the
+real `require`, which rejects stand-ins), hence `internal` when it lives under an external path.
+A `not statically resolvable` warning in an included module usually means another folder for
+`include`. `--include <glob>` / `--internal <path>` do the same for single-entry builds.
+
 ## Runtime behaviour
 
 - Each module runs once and is cached, like Roblox `require`.
@@ -88,8 +113,9 @@ modules are not walked, so whatever they require themselves is not bundled eithe
   both are left as real `require` calls, which only fail if they run (like Roblox). `--strict`
   turns warnings into failures.
 - **warning**: `script` used for anything other than a require path. Inside modules `script` becomes
-  a stand-in that knows `Name`, `Parent`, `ClassName`, `GetFullName()` and child paths; Instance APIs
-  (`GetAttribute`, `GetChildren`, …) are not available. In the entry, `script` is the bundle script.
+  a stand-in that knows `Name`, `Parent`, `ClassName`, `GetFullName()`, child paths and the bundled
+  modules around it (see above); other Instance APIs (`GetAttribute`, …) are not available. In the
+  entry, `script` is the bundle script.
 
 ## Minify and source maps
 

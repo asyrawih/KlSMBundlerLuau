@@ -86,6 +86,13 @@ struct BuildArgs {
     /// Instance path whose modules stay in the game (repeatable), e.g. ReplicatedStorage.
     #[arg(long, value_name = "PATH")]
     external: Vec<String>,
+    /// Instance path under an external one that is bundled anyway (repeatable).
+    #[arg(long, value_name = "PATH")]
+    internal: Vec<String>,
+    /// Glob of module files to bundle even if nothing requires them statically (repeatable,
+    /// single-entry builds only), e.g. 'Addon/Server/Features/*/*Service.luau'.
+    #[arg(long, value_name = "GLOB", requires = "entry")]
+    include: Vec<String>,
 }
 
 impl BuildArgs {
@@ -97,6 +104,7 @@ impl BuildArgs {
                 regenerate_sourcemap: self.regenerate_sourcemap,
                 minify: self.minify.unwrap_or_default(),
                 external: self.external.clone(),
+                internal: self.internal.clone(),
                 bundles: vec![Target {
                     entry: entry.clone(),
                     output: output.clone(),
@@ -104,6 +112,8 @@ impl BuildArgs {
                     minify: None,
                     name: None,
                     external: Vec::new(),
+                    internal: Vec::new(),
+                    include: self.include.clone(),
                 }],
             });
         }
@@ -118,6 +128,7 @@ impl BuildArgs {
         }
         config.regenerate_sourcemap |= self.regenerate_sourcemap;
         config.external.extend(self.external.iter().cloned());
+        config.internal.extend(self.internal.iter().cloned());
         Ok(config)
     }
 }
@@ -247,7 +258,8 @@ fn build_all(config: &Config, strict: bool) -> Result<bool> {
     for target in &config.bundles {
         let started = Instant::now();
         let external = target.external(&config.external);
-        let bundle = build_target(&tree, &aliases, target, config.minify, &external)
+        let internal = target.internal(&config.internal);
+        let bundle = build_target(&tree, &aliases, target, config.minify, &external, &internal)
             .with_context(|| format!("bundling {}", target.entry.display()))?;
         for d in &bundle.diagnostics {
             eprintln!("{d}");

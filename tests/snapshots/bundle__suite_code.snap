@@ -37,22 +37,97 @@ local function __KLSM_require(id)
 end
 
 -- Stand-in for `script` inside bundled modules: the original ModuleScript no longer
--- exists at runtime, so only its name and path survive.
+-- exists at runtime, so its surroundings are rebuilt from the bundled modules' paths.
+-- Lookups walk that tree (GetChildren, FindFirstChild, IsA) and `require` of a stand-in
+-- loads the bundled module, so loaders that scan a folder keep working.
 local __KLSM_Script = {}
+local __KLSM_refs = {}
+local __KLSM_index
+local function __KLSM_node(path)
+	if not __KLSM_index then
+		__KLSM_index = { [""] = { children = {} } }
+		for id, name in __KLSM_names do
+			local at = ""
+			for _, segment in string.split(name, ".") do
+				local child = if at == "" then segment else at .. "." .. segment
+				if not __KLSM_index[child] then
+					__KLSM_index[child] = { children = {} }
+					table.insert(__KLSM_index[at].children, segment)
+				end
+				at = child
+			end
+			__KLSM_index[at].id = id
+		end
+	end
+	return __KLSM_index[path]
+end
 local function __KLSM_ref(segments)
-	return setmetatable({ __segments = segments }, __KLSM_Script)
+	local path = table.concat(segments, ".")
+	local ref = __KLSM_refs[path]
+	if not ref then
+		ref = setmetatable({ __segments = segments, __path = path }, __KLSM_Script)
+		__KLSM_refs[path] = ref
+	end
+	return ref
 end
 local function __KLSM_child(self, name)
 	local segments = table.clone(rawget(self, "__segments"))
 	table.insert(segments, name)
 	return __KLSM_ref(segments)
 end
+local function __KLSM_class(self)
+	local node = __KLSM_node(rawget(self, "__path"))
+	return if node and not node.id then "Folder" else "ModuleScript"
+end
+local function __KLSM_children(self)
+	local node = __KLSM_node(rawget(self, "__path"))
+	local out = {}
+	for _, name in if node then node.children else {} do
+		table.insert(out, __KLSM_child(self, name))
+	end
+	return out
+end
+local function __KLSM_find(self, name)
+	local child = __KLSM_child(self, name)
+	return if __KLSM_node(rawget(child, "__path")) then child else nil
+end
+local function __KLSM_descendants(self, out)
+	out = out or {}
+	for _, child in __KLSM_children(self) do
+		table.insert(out, child)
+		__KLSM_descendants(child, out)
+	end
+	return out
+end
+local function __KLSM_isa(self, class)
+	local own = __KLSM_class(self)
+	return class == own or class == "Instance" or (own == "ModuleScript" and class == "LuaSourceContainer")
+end
+local function __KLSM_ancestor(self, name)
+	local segments = table.clone(rawget(self, "__segments"))
+	table.remove(segments)
+	while #segments > 0 do
+		if segments[#segments] == name then
+			return __KLSM_ref(segments)
+		end
+		segments = table.clone(segments)
+		table.remove(segments)
+	end
+	return nil
+end
+local function __KLSM_fullname(self)
+	return rawget(self, "__path")
+end
 local __KLSM_methods = {
 	WaitForChild = __KLSM_child,
-	FindFirstChild = __KLSM_child,
-	GetFullName = function(self)
-		return table.concat(rawget(self, "__segments"), ".")
+	FindFirstChild = __KLSM_find,
+	GetChildren = __KLSM_children,
+	GetDescendants = function(self)
+		return __KLSM_descendants(self)
 	end,
+	IsA = __KLSM_isa,
+	FindFirstAncestor = __KLSM_ancestor,
+	GetFullName = __KLSM_fullname,
 }
 __KLSM_Script.__index = function(self, key)
 	local segments = rawget(self, "__segments")
@@ -63,7 +138,7 @@ __KLSM_Script.__index = function(self, key)
 		table.remove(parent)
 		return __KLSM_ref(parent)
 	elseif key == "ClassName" then
-		return "ModuleScript"
+		return __KLSM_class(self)
 	elseif __KLSM_methods[key] then
 		return __KLSM_methods[key]
 	end
@@ -74,6 +149,17 @@ __KLSM_Script.__tostring = function(self)
 	return segments[#segments] or "game"
 end
 local __KLSM_script = __KLSM_ref
+local __KLSM_realrequire = require
+local function require(module)
+	if type(module) == "table" and getmetatable(module) == __KLSM_Script then
+		local node = __KLSM_node(rawget(module, "__path"))
+		if node and node.id then
+			return __KLSM_require(node.id)
+		end
+		error("Attempted to call require with invalid argument(s).", 2)
+	end
+	return __KLSM_realrequire(module)
+end
 __KLSM_names[1] = "ReplicatedStorage.Shared.Suite"
 __KLSM_modules[1] = function(...) -- ReplicatedStorage/Shared/Suite.luau
 -- ModuleScript entry used by the runtime test: returns everything it observed.

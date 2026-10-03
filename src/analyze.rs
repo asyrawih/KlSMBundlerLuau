@@ -6,8 +6,8 @@ use crate::tree::{NodeId, ROOT, Tree};
 use full_moon::LuaVersion;
 use full_moon::ast::luau::{ExportedTypeDeclaration, ExportedTypeFunction, TypeInfo};
 use full_moon::ast::{
-    BinOp, Call, Expression, FunctionArgs, FunctionCall, Index, LocalAssignment, Prefix, Suffix,
-    Var, VarExpression,
+    BinOp, Call, Expression, Field, FunctionArgs, FunctionCall, GenericFor, Index, LocalAssignment,
+    Prefix, Suffix, Var, VarExpression,
 };
 use full_moon::node::Node;
 use full_moon::tokenizer::{TokenReference, TokenType};
@@ -21,6 +21,9 @@ pub enum Target {
     Node(NodeId),
     /// Statically shaped but points at something that isn't in the tree.
     Missing(String),
+    /// One of these nodes: a loop variable over a table of resolvable paths
+    /// (`for _, m in { A, B } do require(m) end`).
+    OneOf(Vec<NodeId>),
     /// Not statically resolvable (variables, computed names, ...).
     Dynamic,
     /// `require(123456)` — a published asset; left untouched.
@@ -46,8 +49,29 @@ pub struct Analysis {
     pub exports: Vec<Range<usize>>,
     /// Lines where `script` is used for something other than a resolvable path.
     pub script_uses: Vec<usize>,
+    /// `script` paths used at runtime (`script.Parent:FindFirstChild("Features")`) with the
+    /// node they resolve to; the stand-in handles them if bundled modules live there.
+    pub script_paths: Vec<(usize, NodeId)>,
+    /// `script` starts an alias (`local Server = script:FindFirstAncestor("Addon").Parent`);
+    /// the alias line itself runs, so the module needs the stand-in.
+    pub script_aliases: bool,
     /// `--!` directives at the top of the file.
     pub directives: Vec<String>,
+}
+
+impl Analysis {
+    /// Whether the module needs the `script` stand-in at runtime.
+    pub fn uses_script(&self) -> bool {
+        !self.script_uses.is_empty()
+            || !self.script_paths.is_empty()
+            || self.script_aliases
+            // A loop require evaluates its paths at runtime, through aliases that may start
+            // at `script` (`local Commands = script.Parent.Commands`).
+            || self
+                .requires
+                .iter()
+                .any(|r| matches!(r.target, Target::OneOf(_)))
+    }
 }
 
 #[derive(Debug)]
@@ -86,6 +110,7 @@ pub fn analyze(
         script_tokens: Vec::new(),
         path_ranges: Vec::new(),
         dead_ranges: Vec::new(),
+        script_path_ranges: Vec::new(),
     };
     visitor.visit_ast(result.ast());
 
@@ -94,17 +119,26 @@ pub fn analyze(
         script_tokens,
         path_ranges,
         dead_ranges,
+        script_path_ranges,
         ..
     } = visitor;
     for (byte, line) in script_tokens {
-        let covered = out.requires.iter().any(|r| r.range.contains(&byte))
-            || path_ranges.iter().any(|r| r.contains(&byte))
-            || dead_ranges.iter().any(|r| r.contains(&byte));
-        if !covered {
-            out.script_uses.push(line);
+        if out.requires.iter().any(|r| r.range.contains(&byte))
+            || dead_ranges.iter().any(|r| r.contains(&byte))
+        {
+            continue;
+        }
+        if path_ranges.iter().any(|r| r.contains(&byte)) {
+            out.script_aliases = true;
+            continue;
+        }
+        match script_path_ranges.iter().find(|(r, _)| r.contains(&byte)) {
+            Some((_, node)) => out.script_paths.push((line, *node)),
+            None => out.script_uses.push(line),
         }
     }
     out.script_uses.dedup();
+    out.script_paths.dedup();
     out.directives = source
         .lines()
         .take_while(|l| l.trim().is_empty() || l.trim_start().starts_with("--"))
@@ -125,6 +159,8 @@ struct Analyzer<'a> {
     path_ranges: Vec<Range<usize>>,
     /// Right-hand sides of `game and x or <here>` fallbacks.
     dead_ranges: Vec<Range<usize>>,
+    /// Runtime expressions starting at `script` that resolve to a node.
+    script_path_ranges: Vec<(Range<usize>, NodeId)>,
 }
 
 fn unparen(expr: &Expression) -> &Expression {
@@ -218,7 +254,11 @@ impl Analyzer<'_> {
             _ => Target::Dynamic,
         };
         for suffix in suffixes {
-            let Target::Node(base) = cur else { return cur };
+            let base = match cur {
+                Target::Node(base) => base,
+                Target::OneOf(_) => return Target::Dynamic,
+                _ => return cur,
+            };
             cur = match suffix {
                 Suffix::Index(Index::Dot { name, .. }) => match ident(name) {
                     Some("Parent") => self
@@ -371,8 +411,58 @@ impl Visitor for Analyzer<'_> {
         }
     }
 
-    /// `game and x or y`: `game` is always truthy in Roblox, so `y` never runs there.
+    /// `for _, m in { A, B } do`: `m` is one of the table's nodes inside the loop.
+    fn visit_generic_for(&mut self, for_loop: &GenericFor) {
+        let names: Vec<&str> = for_loop.names().iter().filter_map(ident).collect();
+        let (Some(&value), Some(Expression::TableConstructor(table))) = (
+            names.get(1).or(names.first()),
+            for_loop
+                .expressions()
+                .iter()
+                .next()
+                .filter(|_| for_loop.expressions().len() == 1),
+        ) else {
+            return;
+        };
+        let nodes: Option<Vec<NodeId>> = table
+            .fields()
+            .iter()
+            .map(|f| match f {
+                Field::NoKey(e) => match self.eval(e) {
+                    Target::Node(n) => Some(n),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        if let Some(nodes) = nodes.filter(|n| !n.is_empty()) {
+            self.env.insert(value.to_string(), Target::OneOf(nodes));
+        }
+    }
+
+    fn visit_generic_for_end(&mut self, for_loop: &GenericFor) {
+        for name in for_loop.names().iter().filter_map(ident) {
+            if matches!(self.env.get(name), Some(Target::OneOf(_))) {
+                self.env.remove(name);
+            }
+        }
+    }
+
+    /// Records `script` paths used at runtime, and `game and x or y` fallbacks: `game` is
+    /// always truthy in Roblox, so `y` never runs there.
     fn visit_expression(&mut self, expr: &Expression) {
+        let from_script = match expr {
+            Expression::Var(Var::Expression(ve)) => Some(ve.prefix()),
+            Expression::FunctionCall(fc) => Some(fc.prefix()),
+            _ => None,
+        };
+        if let Some(Prefix::Name(tok)) = from_script
+            && ident(tok) == Some("script")
+            && let Target::Node(node) = self.eval(expr)
+            && let Some((s, e)) = expr.range()
+        {
+            self.script_path_ranges.push((s.bytes()..e.bytes(), node));
+        }
         let Expression::BinaryOperator {
             lhs,
             binop: BinOp::Or(_),

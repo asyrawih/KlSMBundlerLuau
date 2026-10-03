@@ -2,13 +2,18 @@
 root = "../RessoMusic"
 minify = "full"
 external = ["ReplicatedStorage"]
+# AddonLoader scans Addon/*/Features at runtime; a copy goes in each bundle so it can
+# require the bundled addons through the `script` stand-in.
+internal = ["ReplicatedStorage.AddonLoader"]
 
 [[bundle]]
 entry  = "ServerScriptService/Server/Main.server.luau"
 output = "/Users/dxh4nan/Documents/RessoMusic/ServerScriptService/Loader.server.luau"
 rbxmx  = "dist/Server.rbxmx"
+include = ["Addon/Server/Features/*/*Service.luau"]
 
 [[bundle]]
-entry  = "StarterPlayerScripts/Client/Main.local.luau"
-output = "/Users/dxh4nan/Documents/RessoMusic/StarterPlayerScripts/Loader.local.luau"
+entry  = "StarterPlayerScripts/Client/Main.client.luau"
+output = "/Users/dxh4nan/Documents/RessoMusic/StarterPlayerScripts/Loader.client.luau"
 rbxmx  = "dist/Client.rbxmx"
+include = ["Addon/Client/Features/*/*Controller.luau"]

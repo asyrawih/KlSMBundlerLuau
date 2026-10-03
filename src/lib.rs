@@ -19,6 +19,7 @@ pub fn build_target(
     target: &Target,
     default_minify: Minify,
     external: &[String],
+    internal: &[String],
 ) -> Result<Bundle> {
     let entry = tree.find_file(&target.entry)?;
     let name = target.script_name();
@@ -29,6 +30,8 @@ pub fn build_target(
         minify: target.minify.unwrap_or(default_minify),
         script_name: name.clone(),
         external,
+        internal,
+        include: &target.include,
     });
     if !bundle.has_errors() {
         output::write_bundle(&bundle, &target.output)?;

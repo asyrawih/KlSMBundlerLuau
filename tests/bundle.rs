@@ -17,7 +17,25 @@ fn build(fixture: &str, entry: &str, minify: Minify) -> Bundle {
         minify,
         script_name: "Bundle".into(),
         external: &[],
+        internal: &[],
+        include: &[],
     })
+}
+
+/// Whether `code` parses; on a big stack, since full-moon's parser is recursive and debug
+/// builds overflow the test threads' default stack on bundles that carry the full runtime.
+fn parses(code: &str) -> bool {
+    let code = code.to_string();
+    std::thread::Builder::new()
+        .stack_size(256 << 20)
+        .spawn(move || {
+            full_moon::parse_fallible(&code, LuaVersion::luau())
+                .errors()
+                .is_empty()
+        })
+        .unwrap()
+        .join()
+        .unwrap()
 }
 
 fn diagnostics(b: &Bundle) -> String {
@@ -40,11 +58,7 @@ fn module_entry_bundle() {
     let b = build("basic", "ReplicatedStorage/Shared/Suite.luau", Minify::None);
     assert!(!b.has_errors(), "{}", diagnostics(&b));
     assert_eq!(b.module_count, 10);
-    assert!(
-        full_moon::parse_fallible(&b.code, LuaVersion::luau())
-            .errors()
-            .is_empty()
-    );
+    assert!(parses(&b.code));
     insta::assert_snapshot!("suite_diagnostics", diagnostics(&b));
     insta::assert_snapshot!("suite_code", b.code);
 }
@@ -85,12 +99,7 @@ fn minified_output_has_identical_tokens() {
     for level in [Minify::Light, Minify::Full] {
         let min = build("basic", "ReplicatedStorage/Shared/Suite.luau", level);
         assert!(min.code.len() < plain.code.len());
-        assert!(
-            full_moon::parse_fallible(&min.code, LuaVersion::luau())
-                .errors()
-                .is_empty(),
-            "{level:?}"
-        );
+        assert!(parses(&min.code), "{level:?}");
         assert_eq!(code_tokens(&min.code), plain_tokens, "{level:?}");
     }
 }
@@ -201,6 +210,8 @@ fn real_project() {
                 minify,
                 script_name: "B".into(),
                 external: &[],
+                internal: &[],
+                include: &[],
             })
         };
         let plain = make(Minify::None);
@@ -208,11 +219,7 @@ fn real_project() {
         let tokens = code_tokens(&plain.code);
         for level in [Minify::Light, Minify::Full] {
             let min = make(level);
-            assert!(
-                full_moon::parse_fallible(&min.code, LuaVersion::luau())
-                    .errors()
-                    .is_empty()
-            );
+            assert!(parses(&min.code));
             assert_eq!(code_tokens(&min.code), tokens, "{level:?}");
             eprintln!(
                 "{level:?}: {} KB -> {} KB",
@@ -280,6 +287,8 @@ fn luaurc_aliases_resolve() {
         minify: Minify::None,
         script_name: "B".into(),
         external: &[],
+        internal: &[],
+        include: &[],
     });
     assert!(
         !b.has_errors() && b.diagnostics.is_empty(),
@@ -386,6 +395,8 @@ fn external_modules_stay_in_the_game() {
         minify: Minify::None,
         script_name: "Bundle".into(),
         external: &external,
+        internal: &[],
+        include: &[],
     });
     assert!(!b.has_errors(), "{}", diagnostics(&b));
     // Pkg (with its lib), Lazy.A and Lazy.B are no longer bundled (10 -> 6).
@@ -403,9 +414,106 @@ fn external_modules_stay_in_the_game() {
             .iter()
             .any(|f| f.contains("Pkg") || f.contains("Lazy"))
     );
-    assert!(
-        full_moon::parse_fallible(&b.code, LuaVersion::luau())
-            .errors()
-            .is_empty()
+    assert!(parses(&b.code));
+}
+
+fn build_addons(include: &[String], minify: Minify) -> Bundle {
+    let tree = Tree::load(Path::new("tests/fixtures/addons"), None).unwrap();
+    let entry = tree
+        .find_file(Path::new("ServerScriptService/Server/Main.server.luau"))
+        .unwrap();
+    bundle::bundle(&Options {
+        tree: &tree,
+        aliases: &Aliases::new(),
+        entry,
+        minify,
+        script_name: "Bundle".into(),
+        external: &["ReplicatedStorage".to_string()],
+        internal: &["ReplicatedStorage.AddonLoader".to_string()],
+        include,
+    })
+}
+
+#[test]
+fn included_modules_are_bundled_for_runtime_loaders() {
+    // Without `include` only what Main reaches statically: Addons + AddonLoader (internal).
+    let b = build_addons(&[], Minify::None);
+    assert!(!b.has_errors(), "{}", diagnostics(&b));
+    assert_eq!(b.module_count, 2);
+    // Nothing bundled under Features: the stand-in would find nothing there.
+    assert!(diagnostics(&b).contains("Addons.luau:5: `script` used at runtime"));
+    assert_eq!(b.external_count, 0);
+
+    let b = build_addons(
+        &["ServerScriptService/Addon/Features/*/*Service.luau".to_string()],
+        Minify::None,
     );
+    assert!(!b.has_errors(), "{}", diagnostics(&b));
+    // + Alpha/Beta/Broken services, AlphaHelper and Beta's commands (required in a loop over
+    // a table); not the story nor Gamma's helper.
+    assert_eq!(b.module_count, 8);
+    // `script.Parent:FindFirstChild("Features")` reaches bundled modules and Beta's loop
+    // require resolves, so only Alpha's stand-in API calls (IsA, GetChildren, ...) warn.
+    let d = diagnostics(&b);
+    assert_eq!(d.lines().count(), 1, "{d}");
+    assert!(
+        d.contains("AlphaService.luau:4: `script` used at runtime"),
+        "{d}"
+    );
+    assert!(b.inputs.iter().any(|f| f.ends_with("AlphaHelper.luau")));
+    assert!(
+        !b.inputs
+            .iter()
+            .any(|f| f.contains("story") || f.contains("Gamma"))
+    );
+    assert!(parses(&b.code));
+}
+
+#[test]
+fn include_reports_globs_that_match_nothing() {
+    let b = build_addons(&["Nowhere/*.luau".to_string()], Minify::None);
+    assert!(diagnostics(&b).contains("include \"Nowhere/*.luau\" matches no script"));
+    let b = build_addons(
+        &["ServerScriptService/Server/*.luau".to_string()],
+        Minify::None,
+    );
+    assert!(b.has_errors(), "a Script can't be included");
+}
+
+/// `LUAU_BIN=/path/to/luau cargo test addon_loader_runs_under_luau`
+#[test]
+fn addon_loader_runs_under_luau() {
+    let Ok(luau) = std::env::var("LUAU_BIN") else {
+        return;
+    };
+    let include = ["ServerScriptService/Addon/Features/*/*Service.luau".to_string()];
+    for level in [Minify::None, Minify::Light, Minify::Full] {
+        let b = build_addons(&include, level);
+        assert!(!b.has_errors(), "{}", diagnostics(&b));
+        let script = format!(
+            "game = {{ GetService = function() return {{}} end }}\nwarn = function(m) print(\"warn:\", m) end\n{}",
+            b.code
+        );
+        let dir =
+            std::env::temp_dir().join(format!("klsm-addons-{}-{level:?}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("addons.luau");
+        std::fs::write(&file, script).unwrap();
+        let out = std::process::Command::new(&luau)
+            .arg(&file)
+            .output()
+            .unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "{level:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            stdout,
+            "warn:\tskipped BrokenService\nAlpha,Beta\t42\ttrue\ttrue\ttrue\t2\that+move\tServer\n",
+            "{level:?}"
+        );
+    }
 }
