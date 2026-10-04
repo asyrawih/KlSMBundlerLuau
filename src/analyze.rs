@@ -55,6 +55,9 @@ pub struct Analysis {
     /// `script` starts an alias (`local Server = script:FindFirstAncestor("Addon").Parent`);
     /// the alias line itself runs, so the module needs the stand-in.
     pub script_aliases: bool,
+    /// Byte offsets of the `script` tokens that start those paths and aliases; in the entry
+    /// they are rewritten to a stand-in at the script's original place.
+    pub script_reroutes: Vec<usize>,
     /// `--!` directives at the top of the file.
     pub directives: Vec<String>,
 }
@@ -130,10 +133,14 @@ pub fn analyze(
         }
         if path_ranges.iter().any(|r| r.contains(&byte)) {
             out.script_aliases = true;
+            out.script_reroutes.push(byte);
             continue;
         }
         match script_path_ranges.iter().find(|(r, _)| r.contains(&byte)) {
-            Some((_, node)) => out.script_paths.push((line, *node)),
+            Some((_, node)) => {
+                out.script_paths.push((line, *node));
+                out.script_reroutes.push(byte);
+            }
             None => out.script_uses.push(line),
         }
     }

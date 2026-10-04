@@ -53,6 +53,9 @@ pub struct Target {
     /// finds with `GetChildren()`.
     #[serde(default)]
     pub include: Vec<String>,
+    /// Globs taken out of what `include` matched (`Addon/Server/Features/Affiliate/*`).
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 impl Target {

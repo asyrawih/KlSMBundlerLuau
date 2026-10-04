@@ -10,10 +10,24 @@ internal = ["ReplicatedStorage.AddonLoader"]
 entry  = "ServerScriptService/Server/Main.server.luau"
 output = "/Users/dxh4nan/Documents/RessoMusic/ServerScriptService/Loader.server.luau"
 rbxmx  = "dist/Server.rbxmx"
-include = ["Addon/Server/Features/*/*Service.luau"]
+include = [
+  "Addon/Server/Features/*/*Service.luau",
+  "Addon/Server/Features/*/*Boot.luau",   # loaded by Main before the base services
+]
+exclude = [
+  "Addon/Server/Features/MimicParty/*Service.luau",
+  "Addon/Server/Features/Affiliate/*Service.luau",
+]
 
 [[bundle]]
 entry  = "StarterPlayerScripts/Client/Main.client.luau"
 output = "/Users/dxh4nan/Documents/RessoMusic/StarterPlayerScripts/Loader.client.luau"
 rbxmx  = "dist/Client.rbxmx"
-include = ["Addon/Client/Features/*/*Controller.luau"]
+include = [
+  "Addon/Client/Features/*/*Controller.luau",
+  "Addon/Client/Features/*/*Boot.luau",
+]
+exclude = [
+  "Addon/Client/Features/MimicParty/*Controller.luau",
+  "Addon/Client/Features/Affiliate/*Controller.luau",
+]

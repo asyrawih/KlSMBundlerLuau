@@ -93,6 +93,9 @@ struct BuildArgs {
     /// single-entry builds only), e.g. 'Addon/Server/Features/*/*Service.luau'.
     #[arg(long, value_name = "GLOB", requires = "entry")]
     include: Vec<String>,
+    /// Glob taken out of what --include matched (repeatable).
+    #[arg(long, value_name = "GLOB", requires = "entry")]
+    exclude: Vec<String>,
 }
 
 impl BuildArgs {
@@ -114,6 +117,7 @@ impl BuildArgs {
                     external: Vec::new(),
                     internal: Vec::new(),
                     include: self.include.clone(),
+                    exclude: self.exclude.clone(),
                 }],
             });
         }

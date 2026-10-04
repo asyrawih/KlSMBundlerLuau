@@ -19,6 +19,7 @@ fn build(fixture: &str, entry: &str, minify: Minify) -> Bundle {
         external: &[],
         internal: &[],
         include: &[],
+        exclude: &[],
     })
 }
 
@@ -212,6 +213,7 @@ fn real_project() {
                 external: &[],
                 internal: &[],
                 include: &[],
+                exclude: &[],
             })
         };
         let plain = make(Minify::None);
@@ -289,6 +291,7 @@ fn luaurc_aliases_resolve() {
         external: &[],
         internal: &[],
         include: &[],
+        exclude: &[],
     });
     assert!(
         !b.has_errors() && b.diagnostics.is_empty(),
@@ -397,6 +400,7 @@ fn external_modules_stay_in_the_game() {
         external: &external,
         internal: &[],
         include: &[],
+        exclude: &[],
     });
     assert!(!b.has_errors(), "{}", diagnostics(&b));
     // Pkg (with its lib), Lazy.A and Lazy.B are no longer bundled (10 -> 6).
@@ -431,6 +435,7 @@ fn build_addons(include: &[String], minify: Minify) -> Bundle {
         external: &["ReplicatedStorage".to_string()],
         internal: &["ReplicatedStorage.AddonLoader".to_string()],
         include,
+        exclude: &[],
     })
 }
 
@@ -470,6 +475,36 @@ fn included_modules_are_bundled_for_runtime_loaders() {
 }
 
 #[test]
+fn exclude_removes_included_modules() {
+    let tree = Tree::load(Path::new("tests/fixtures/addons"), None).unwrap();
+    let entry = tree
+        .find_file(Path::new("ServerScriptService/Server/Main.server.luau"))
+        .unwrap();
+    let b = bundle::bundle(&Options {
+        tree: &tree,
+        aliases: &Aliases::new(),
+        entry,
+        minify: Minify::None,
+        script_name: "Bundle".into(),
+        external: &["ReplicatedStorage".to_string()],
+        internal: &["ReplicatedStorage.AddonLoader".to_string()],
+        include: &["ServerScriptService/Addon/Features/*/*Service.luau".to_string()],
+        exclude: &[
+            "ServerScriptService/Addon/Features/Alpha/*".to_string(),
+            "ServerScriptService/Addon/Features/Typo/*".to_string(),
+        ],
+    });
+    assert!(!b.has_errors(), "{}", diagnostics(&b));
+    // Alpha's service (and so its helper) is gone: 8 -> 6.
+    assert_eq!(b.module_count, 6);
+    assert!(!b.inputs.iter().any(|f| f.contains("Alpha")));
+    assert!(
+        diagnostics(&b)
+            .contains("exclude \"ServerScriptService/Addon/Features/Typo/*\" matches no script")
+    );
+}
+
+#[test]
 fn include_reports_globs_that_match_nothing() {
     let b = build_addons(&["Nowhere/*.luau".to_string()], Minify::None);
     assert!(diagnostics(&b).contains("include \"Nowhere/*.luau\" matches no script"));
@@ -486,7 +521,10 @@ fn addon_loader_runs_under_luau() {
     let Ok(luau) = std::env::var("LUAU_BIN") else {
         return;
     };
-    let include = ["ServerScriptService/Addon/Features/*/*Service.luau".to_string()];
+    let include = [
+        "ServerScriptService/Addon/Features/*/*Service.luau".to_string(),
+        "ServerScriptService/Addon/Features/*/*Boot.luau".to_string(),
+    ];
     for level in [Minify::None, Minify::Light, Minify::Full] {
         let b = build_addons(&include, level);
         assert!(!b.has_errors(), "{}", diagnostics(&b));
@@ -512,7 +550,7 @@ fn addon_loader_runs_under_luau() {
         );
         assert_eq!(
             stdout,
-            "warn:\tskipped BrokenService\nAlpha,Beta\t42\ttrue\ttrue\ttrue\t2\that+move\tServer\n",
+            "warn:\tskipped BrokenService\nAlpha,Beta\t42\ttrue\ttrue\ttrue\t3\that+move\tServer\tAlphaBoot\n",
             "{level:?}"
         );
     }

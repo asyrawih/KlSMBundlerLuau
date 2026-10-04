@@ -121,6 +121,8 @@ pub struct Options<'a> {
     /// Globs of module files bundled even when nothing requires them statically; at
     /// runtime they are reached through the `script` stand-in (`GetChildren`, `require`).
     pub include: &'a [String],
+    /// Globs removed from what `include` matched.
+    pub exclude: &'a [String],
 }
 
 impl Options<'_> {
@@ -129,40 +131,63 @@ impl Options<'_> {
     }
 }
 
-/// Module nodes whose file matches one of `globs`, sorted by file.
-fn resolve_include(tree: &Tree, globs: &[String], diags: &mut Vec<Diagnostic>) -> Vec<NodeId> {
-    let mut found = Vec::new();
-    for pattern in globs {
-        let glob = match globset::GlobBuilder::new(&crate::tree::normalize(pattern))
-            .literal_separator(true)
-            .build()
-        {
-            Ok(g) => g.compile_matcher(),
-            Err(e) => {
-                diags.push(error(
-                    "bundle.toml",
-                    0,
-                    format!("bad include glob {pattern:?}: {e}"),
-                ));
-                continue;
-            }
-        };
-        let mut matched: Vec<(String, NodeId)> = tree
-            .nodes
-            .iter()
-            .enumerate()
-            .filter_map(|(id, n)| n.file.as_ref().map(|f| (f.clone(), id)))
-            .filter(|(f, _)| glob.is_match(f))
-            .collect();
-        matched.sort();
-        if matched.is_empty() {
-            diags.push(warning(
+/// Scripts whose file matches `pattern`, sorted by file; warns when there are none (a typo).
+fn matching(
+    tree: &Tree,
+    key: &str,
+    pattern: &str,
+    diags: &mut Vec<Diagnostic>,
+) -> Vec<(String, NodeId)> {
+    let glob = match globset::GlobBuilder::new(&crate::tree::normalize(pattern))
+        .literal_separator(true)
+        .build()
+    {
+        Ok(g) => g.compile_matcher(),
+        Err(e) => {
+            diags.push(error(
                 "bundle.toml",
                 0,
-                format!("include {pattern:?} matches no script"),
+                format!("bad {key} glob {pattern:?}: {e}"),
             ));
+            return Vec::new();
         }
-        for (file, id) in matched {
+    };
+    let mut matched: Vec<(String, NodeId)> = tree
+        .nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(id, n)| n.file.as_ref().map(|f| (f.clone(), id)))
+        .filter(|(f, _)| glob.is_match(f))
+        .collect();
+    matched.sort();
+    if matched.is_empty() {
+        diags.push(warning(
+            "bundle.toml",
+            0,
+            format!("{key} {pattern:?} matches no script"),
+        ));
+    }
+    matched
+}
+
+/// Module nodes matched by `include` and not by `exclude`, sorted by file per glob.
+fn resolve_include(
+    tree: &Tree,
+    include: &[String],
+    exclude: &[String],
+    diags: &mut Vec<Diagnostic>,
+) -> Vec<NodeId> {
+    let excluded: Vec<NodeId> = exclude
+        .iter()
+        .flat_map(|p| matching(tree, "exclude", p, diags))
+        .map(|(_, id)| id)
+        .collect();
+    let mut found = Vec::new();
+    for pattern in include {
+        for (file, id) in matching(tree, "include", pattern, diags) {
+            if excluded.contains(&id) {
+                continue;
+            }
             if !tree.node(id).is_module() {
                 diags.push(error(
                     &file,
@@ -204,7 +229,7 @@ pub fn bundle(opts: &Options) -> Bundle {
     let mut seen: HashMap<NodeId, usize> = HashMap::from([(opts.entry, 0)]);
     let id_shift = usize::from(entry.is_module());
     let mut external_count = 0;
-    for id in resolve_include(tree, opts.include, &mut diags) {
+    for id in resolve_include(tree, opts.include, opts.exclude, &mut diags) {
         if opts.is_external(id) {
             diags.push(warning(
                 tree.node(id).file.as_deref().unwrap_or_default(),
@@ -338,7 +363,7 @@ pub fn bundle(opts: &Options) -> Bundle {
             unit.analysis
                 .script_paths
                 .iter()
-                .filter(|(_, n)| unit.id.is_none() || !around_bundled.contains(n))
+                .filter(|(_, n)| !around_bundled.contains(n))
                 .map(|(l, _)| *l),
         );
         lines.sort();
@@ -499,6 +524,19 @@ fn rewrite(unit: &Unit, tree: &Tree, id_of: &HashMap<NodeId, usize>, opts: &Opti
         };
         edits.push((site.range.clone(), text));
     }
+    // In the entry `script` is the bundle Script, which lives somewhere else; paths that
+    // start at it (`script.Parent.Parent.Addon`) go through a stand-in at the original place.
+    if unit.id.is_none() && !unit.analysis.script_reroutes.is_empty() {
+        let segs: Vec<String> = tree
+            .segments(unit.node)
+            .iter()
+            .map(|s| lua_string(s))
+            .collect();
+        let standin = format!("__KLSM_script({{{}}})", segs.join(","));
+        for &byte in &unit.analysis.script_reroutes {
+            edits.push((byte..byte + "script".len(), standin.clone()));
+        }
+    }
     if unit.id.is_some() {
         for range in &unit.analysis.exports {
             edits.push((range.clone(), String::new()));
@@ -555,9 +593,13 @@ fn emit(
         ));
     }
 
-    let needs_proxy = units
-        .iter()
-        .any(|u| u.id.is_some() && u.analysis.uses_script());
+    let needs_proxy = units.iter().any(|u| {
+        if u.id.is_some() {
+            u.analysis.uses_script()
+        } else {
+            !u.analysis.script_reroutes.is_empty()
+        }
+    });
     let runtime = match RUNTIME.split_once(PROXY_MARKER) {
         Some((core, proxy)) if needs_proxy => format!("{core}{proxy}"),
         Some((core, _)) => core.to_string(),

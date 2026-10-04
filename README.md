@@ -92,8 +92,13 @@ At runtime the `script` stand-in sees the bundled modules as an instance tree: `
 (`ModuleScript`, or `Folder` for the folders between them), and `require` of a stand-in loads the
 bundled module. The loader itself must run inside the bundle (a module left in the game calls the
 real `require`, which rejects stand-ins), hence `internal` when it lives under an external path.
-A `not statically resolvable` warning in an included module usually means another folder for
-`include`. `--include <glob>` / `--internal <path>` do the same for single-entry builds.
+`exclude` (same glob form) takes files back out of what `include` matched, e.g.
+`["Addon/Server/Features/Affiliate/*"]` to ship without that addon. A glob in either list that
+matches nothing is a warning, which catches typos. In the entry, `script` paths and aliases
+(`script.Parent.Parent.Addon:FindFirstChild("Features")`) go through a stand-in at the entry's
+original place, since the bundle Script itself lives elsewhere; other uses of `script` there stay
+the bundle Script. A `not statically resolvable` warning in an included module usually means
+another folder for `include`. `--include <glob>` / `--internal <path>` do the same for single-entry builds.
 
 ## Runtime behaviour
 

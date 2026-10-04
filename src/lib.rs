@@ -32,6 +32,7 @@ pub fn build_target(
         external,
         internal,
         include: &target.include,
+        exclude: &target.exclude,
     });
     if !bundle.has_errors() {
         output::write_bundle(&bundle, &target.output)?;
