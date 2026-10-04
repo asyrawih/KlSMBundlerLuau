@@ -1,0 +1,164 @@
+/* ==========================================================================
+   Unrest Studio — tokens.css
+   1:1 with DESIGN.md v0.1 (YAML front matter + Implementation section).
+   Night is the default theme; Daylight is opt-in via [data-theme="light"].
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* ---- Brand ---- */
+  --us-primary: #FF5A1A;
+  --us-on-primary: #0A0706;
+  --us-primary-hover: #FF7B3F;
+  --us-primary-pressed: #E64A0C;
+  --us-primary-strong: #C43E04;
+  --us-secondary: #E3170A;
+  --us-tertiary: #F7D6BF;
+  --us-crimson: #C10801;
+  --us-sand: #D9C3AB;
+
+  /* ---- Ember scale ---- */
+  --us-ember-50: #FFF4ED;  --us-ember-100: #FFE4D3; --us-ember-200: #FFC6A5;
+  --us-ember-300: #FF9E6B; --us-ember-400: #FF7B3F; --us-ember-500: #FF5A1A;
+  --us-ember-600: #E64A0C; --us-ember-700: #C43E04; --us-ember-800: #962F06;
+  --us-ember-900: #66220A; --us-ember-950: #3A1206;
+
+  /* ---- Neutrals: Ash (themeable) ---- */
+  --us-void: #000000;
+  --us-bg: #0A0706;
+  --us-surface: #120E0C;
+  --us-surface-2: #1C1817;
+  --us-surface-3: #26211F;
+  --us-surface-4: #332D2A;
+  --us-outline: #3A3431;
+  --us-outline-subtle: #241F1D;
+  --us-text: #F5F1EC;
+  --us-text-muted: #B8B0A9;
+  --us-text-subtle: #8A837E;
+  --us-text-disabled: #5C5652;
+  --us-accent-text: #FF5A1A;           /* orange used as text */
+  --us-paper: #F9F7F5; --us-paper-2: #EFEAE5; --us-ink: #0A0706; --us-ink-muted: #4A4440;
+
+  /* Hairlines & washes (themeable) */
+  --us-hair: rgba(255,255,255,.08);
+  --us-hair-strong: rgba(255,255,255,.12);
+  --us-hair-bright: rgba(255,255,255,.20);
+  --us-wash: rgba(255,255,255,.06);
+  --us-wash-2: rgba(255,255,255,.04);
+  --us-glass-fill: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.02));
+  --us-scrim: rgba(0,0,0,.6);
+  --us-header-fill: rgba(18,14,12,.62);
+
+  /* Literal translucent whites (for use over imagery, never themed) */
+  --us-white-4: rgba(255,255,255,.04); --us-white-6: rgba(255,255,255,.06);
+  --us-white-8: rgba(255,255,255,.08); --us-white-12: rgba(255,255,255,.12);
+  --us-white-20: rgba(255,255,255,.20);
+
+  /* ---- Semantic ---- */
+  --us-success: #3DD68C; --us-warning: #F5B83D; --us-error: #FF4D5E; --us-info: #6CB4FF;
+
+  /* ---- Rarity (game) ---- */
+  --us-rarity-common: #B8B0A9; --us-rarity-uncommon: #3DD68C; --us-rarity-rare: #6CB4FF;
+  --us-rarity-epic: #B57BFF; --us-rarity-legendary: #FF5A1A; --us-rarity-mythic: #F7D6BF;
+
+  /* ---- Gradients ---- */
+  --us-gradient-heat: linear-gradient(135deg,#000 0%,#3A1206 30%,#C10801 58%,#FF5A1A 80%,#F7D6BF 100%);
+  --us-gradient-heat-corner: radial-gradient(120% 90% at 100% 100%,#F7D6BF 0%,#FF5A1A 22%,#C10801 48%,#3A1206 72%,#000 100%);
+  --us-gradient-underglow: radial-gradient(120% 75% at 50% 108%,rgba(247,214,191,.95) 0%,rgba(255,123,63,.9) 14%,rgba(255,90,26,.75) 26%,rgba(193,8,1,.45) 44%,rgba(10,7,6,0) 66%);
+  --us-gradient-bloom: radial-gradient(60% 55% at 85% 0%,rgba(255,90,26,.55) 0%,rgba(193,8,1,.25) 40%,rgba(10,7,6,0) 72%);
+  --us-gradient-text: linear-gradient(180deg,#F5F1EC 30%,#B8B0A9 100%);
+  --us-gradient-glass: linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.02));
+
+  /* ---- Effects ---- */
+  --us-rim-top: inset 0 1px 0 rgba(255,255,255,.08);
+  --us-rim-ember: inset 0 1px 0 rgba(255,158,107,.35);
+  --us-shadow-float: 0 24px 48px -12px rgba(0,0,0,.6);
+  --us-glow-sm: 0 0 0 1px rgba(255,90,26,.35), 0 0 12px rgba(255,90,26,.30);
+  --us-glow-md: 0 0 0 1px rgba(255,90,26,.45), 0 0 24px rgba(255,90,26,.35), 0 0 64px rgba(193,8,1,.20);
+  --us-glow-lg: 0 0 48px rgba(255,90,26,.45), 0 0 140px rgba(193,8,1,.30);
+  --us-glow-text: 0 0 24px rgba(255,123,63,.55);
+  --us-focus-ring: 0 0 0 2px #0A0706, 0 0 0 4px #FF7B3F;
+  --us-blur-sm: 8px; --us-blur-md: 20px; --us-blur-lg: 24px; --us-blur-xl: 48px;
+
+  /* ---- Radius ---- */
+  --us-r-xs: 4px; --us-r-sm: 8px; --us-r-md: 12px; --us-r-lg: 16px; --us-r-xl: 20px;
+  --us-r-2xl: 28px; --us-r-3xl: 36px; --us-r-full: 9999px;
+
+  /* ---- Border thickness ---- */
+  --us-bw-hair: 1px; --us-bw-strong: 1.5px; --us-bw-accent: 2px;
+
+  /* ---- Spacing (4px base) ---- */
+  --us-s-3xs: 2px; --us-s-2xs: 4px; --us-s-xs: 8px; --us-s-sm: 12px; --us-s-md: 16px;
+  --us-s-lg: 24px; --us-s-xl: 32px; --us-s-2xl: 48px; --us-s-3xl: 64px; --us-s-4xl: 96px;
+  --us-s-5xl: 128px; --us-s-6xl: 160px;
+  --us-gutter: 24px; --us-margin: 64px; --us-container: 1200px; --us-read: 720px;
+  --us-section-y: 128px;
+
+  /* ---- Type ---- */
+  --us-font-display: "Inter Tight", "Inter", "Helvetica Neue", Arial, sans-serif;
+  --us-font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --us-font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  --us-font-serif: "Instrument Serif", Georgia, serif;
+  --us-font-logo: "Inter", system-ui, sans-serif;   /* logotext is set in Inter */
+
+  --us-fs-display-xl: 96px; --us-fs-display-lg: 72px; --us-fs-display-md: 56px;
+  --us-fs-h1: 48px; --us-fs-h2: 36px; --us-fs-h3: 28px; --us-fs-h4: 22px; --us-fs-h5: 18px; --us-fs-h6: 13px;
+  --us-fs-body-lg: 18px; --us-fs-body: 16px; --us-fs-body-sm: 14px; --us-fs-caption: 12px;
+  --us-fs-stat: 80px;
+
+  /* ---- Motion ---- */
+  --us-ease-out: cubic-bezier(.16,1,.3,1);
+  --us-ease-standard: cubic-bezier(.2,0,0,1);
+  --us-ease-in: cubic-bezier(.7,0,.84,0);
+  --us-dur-instant: 80ms; --us-dur-fast: 160ms; --us-dur-base: 240ms;
+  --us-dur-slow: 480ms; --us-dur-cinematic: 1100ms; --us-dur-breathe: 2400ms;
+}
+
+/* ---- Daylight mode (limited use per DESIGN.md) ---- */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --us-bg: #F9F7F5;
+  --us-surface: #FFFFFF;
+  --us-surface-2: #EFEAE5;
+  --us-surface-3: #E6DFD9;
+  --us-surface-4: #DAD2CB;
+  --us-outline: #D6CEC7;
+  --us-outline-subtle: #E9E3DD;
+  --us-text: #0A0706;
+  --us-text-muted: #4A4440;
+  --us-text-subtle: #6B635D;
+  --us-text-disabled: #A39B95;
+  --us-accent-text: #C43E04;
+  --us-hair: rgba(10,7,6,.10);
+  --us-hair-strong: rgba(10,7,6,.16);
+  --us-hair-bright: rgba(10,7,6,.24);
+  --us-wash: rgba(10,7,6,.05);
+  --us-wash-2: rgba(10,7,6,.03);
+  --us-glass-fill: linear-gradient(180deg, rgba(255,255,255,.75), rgba(255,255,255,.55));
+  --us-scrim: rgba(10,7,6,.35);
+  --us-header-fill: rgba(255,255,255,.72);
+  --us-rim-top: inset 0 1px 0 rgba(255,255,255,.9);
+  --us-shadow-float: 0 24px 48px -16px rgba(10,7,6,.18);
+  --us-gradient-text: linear-gradient(180deg,#0A0706 30%,#4A4440 100%);
+  --us-focus-ring: 0 0 0 2px #F9F7F5, 0 0 0 4px #C43E04;
+}
+
+/* ---- Container-driven scale (the .site element is the query container) ---- */
+@container site (max-width: 1023px) {
+  .site-scope { --us-margin: 40px; --us-gutter: 20px; --us-section-y: 96px; }
+}
+@container site (max-width: 639px) {
+  .site-scope {
+    --us-margin: 20px; --us-gutter: 16px; --us-section-y: 72px;
+    --us-fs-display-xl: 48px; --us-fs-display-lg: 42px; --us-fs-display-md: 36px;
+    --us-fs-h1: 32px; --us-fs-h2: 28px; --us-fs-h3: 22px; --us-fs-h4: 20px; --us-fs-h5: 17px;
+    --us-fs-body-lg: 17px; --us-fs-stat: 56px;
+  }
+}
+@container site (min-width: 640px) and (max-width: 1023px) {
+  .site-scope {
+    --us-fs-display-xl: 72px; --us-fs-display-lg: 56px; --us-fs-display-md: 44px;
+    --us-fs-h1: 40px; --us-fs-h2: 32px; --us-fs-h3: 24px; --us-fs-stat: 64px;
+  }
+}

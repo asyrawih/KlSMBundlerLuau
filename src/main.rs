@@ -1,10 +1,9 @@
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
-use klsm_bundler::bundle::Level;
-use klsm_bundler::config::{self, Config, Target};
+use klsm_bundler::config::{Config, Target};
 use klsm_bundler::minify::Minify;
 use klsm_bundler::tree::{NodeId, ROOT, Tree};
-use klsm_bundler::{build_target, output, trace};
+use klsm_bundler::{build_all, output, profile, sourcemap_summary, trace};
 use notify::{RecursiveMode, Watcher};
 use std::io::Read;
 use std::path::PathBuf;
@@ -93,12 +92,35 @@ struct BuildArgs {
     /// single-entry builds only), e.g. 'Addon/Server/Features/*/*Service.luau'.
     #[arg(long, value_name = "GLOB", requires = "entry")]
     include: Vec<String>,
+    /// Build for a client profile (`clients/<name>.toml` next to the config): its disabled
+    /// features are excluded and outputs go to `dist/<name>/`.
+    #[arg(long, value_name = "NAME", conflicts_with = "entry")]
+    client: Option<String>,
     /// Glob taken out of what --include matched (repeatable).
     #[arg(long, value_name = "GLOB", requires = "entry")]
     exclude: Vec<String>,
 }
 
 impl BuildArgs {
+    fn config_path(&self) -> PathBuf {
+        self.config
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("bundle.toml"))
+    }
+
+    /// Builds every target and, for a client profile, its one-file package.
+    fn build(&self, config: &Config) -> Result<bool> {
+        let ok = build_all(config, self.strict, &mut |l| eprintln!("{l}"))?;
+        if ok && let Some(name) = &self.client {
+            let package = profile::write_package(config, &self.config_path(), name)?;
+            eprintln!(
+                "✓ package → {} (drop it into ServerScriptService)",
+                package.display()
+            );
+        }
+        Ok(ok)
+    }
+
     fn config(&self) -> Result<Config> {
         if let (Some(root), Some(entry), Some(output)) = (&self.root, &self.entry, &self.output) {
             return Ok(Config {
@@ -108,6 +130,7 @@ impl BuildArgs {
                 minify: self.minify.unwrap_or_default(),
                 external: self.external.clone(),
                 internal: self.internal.clone(),
+                features: None,
                 bundles: vec![Target {
                     entry: entry.clone(),
                     output: output.clone(),
@@ -118,13 +141,11 @@ impl BuildArgs {
                     internal: Vec::new(),
                     include: self.include.clone(),
                     exclude: self.exclude.clone(),
+                    prologue: None,
                 }],
             });
         }
-        let path = self
-            .config
-            .clone()
-            .unwrap_or_else(|| PathBuf::from("bundle.toml"));
+        let path = self.config_path();
         let mut config = Config::load(&path)?;
         if let Some(m) = self.minify {
             config.minify = m;
@@ -133,6 +154,10 @@ impl BuildArgs {
         config.regenerate_sourcemap |= self.regenerate_sourcemap;
         config.external.extend(self.external.iter().cloned());
         config.internal.extend(self.internal.iter().cloned());
+        if let Some(name) = &self.client {
+            let profile = profile::load(&path, name)?;
+            profile::apply(&mut config, &path, name, &profile)?;
+        }
         Ok(config)
     }
 }
@@ -157,7 +182,7 @@ fn main() {
 
 fn run() -> Result<bool> {
     match Cli::parse().command {
-        Command::Build(args) => build_all(&args.config()?, args.strict),
+        Command::Build(args) => args.build(&args.config()?),
         Command::Watch(args) => watch(&args).map(|_| true),
         Command::Trace { map, lines } => {
             let map = trace::load(&map)?;
@@ -229,72 +254,6 @@ fn run() -> Result<bool> {
     }
 }
 
-fn sourcemap_summary(tree: &Tree) -> String {
-    format!(
-        "+{} from disk, -{} missing",
-        tree.stale_files.len(),
-        tree.missing_files.len()
-    )
-}
-
-/// Returns false if any target failed.
-fn build_all(config: &Config, strict: bool) -> Result<bool> {
-    let tree = Tree::load(&config.root, config.sourcemap.as_deref())?;
-    let aliases = config::load_aliases(&tree.root_dir)?;
-    if tree.is_stale() {
-        let sourcemap = config.sourcemap_path();
-        if config.regenerate_sourcemap && sourcemap.parent().is_some_and(|d| d.is_dir()) {
-            tree.write_sourcemap(&sourcemap)?;
-            eprintln!(
-                "note: regenerated {} ({})",
-                sourcemap.display(),
-                sourcemap_summary(&tree)
-            );
-        } else if !tree.stale_files.is_empty() {
-            eprintln!(
-                "note: sourcemap.json is missing {} script(s) found on disk (e.g. {}); using the folder layout for them (`klsm sourcemap` or `regenerate_sourcemap = true` fixes this)",
-                tree.stale_files.len(),
-                tree.stale_files[0]
-            );
-        }
-    }
-    let mut ok = true;
-    for target in &config.bundles {
-        let started = Instant::now();
-        let external = target.external(&config.external);
-        let internal = target.internal(&config.internal);
-        let bundle = build_target(&tree, &aliases, target, config.minify, &external, &internal)
-            .with_context(|| format!("bundling {}", target.entry.display()))?;
-        for d in &bundle.diagnostics {
-            eprintln!("{d}");
-        }
-        let warnings = bundle
-            .diagnostics
-            .iter()
-            .filter(|d| d.level == Level::Warning)
-            .count();
-        if bundle.has_errors() || (strict && warnings > 0) {
-            ok = false;
-            eprintln!("✗ {} — not written", target.entry.display());
-        } else {
-            let external = if bundle.external_count > 0 {
-                format!(", {} external", bundle.external_count)
-            } else {
-                String::new()
-            };
-            eprintln!(
-                "✓ {} → {} ({} modules{external}, {} KB, {warnings} warnings, {} ms)",
-                target.entry.display(),
-                target.output.display(),
-                bundle.module_count,
-                bundle.code.len() / 1024,
-                started.elapsed().as_millis()
-            );
-        }
-    }
-    Ok(ok)
-}
-
 fn watch(args: &BuildArgs) -> Result<()> {
     let config = args.config()?;
     let root = config
@@ -305,7 +264,7 @@ fn watch(args: &BuildArgs) -> Result<()> {
     let mut watcher = notify::recommended_watcher(tx)?;
     watcher.watch(&root, RecursiveMode::Recursive)?;
     eprintln!("watching {}", root.display());
-    if let Err(e) = build_all(&config, args.strict) {
+    if let Err(e) = args.build(&config) {
         eprintln!("error: {e:#}");
     }
 
@@ -329,7 +288,7 @@ fn watch(args: &BuildArgs) -> Result<()> {
             .is_ok()
         {}
         eprintln!("\nchange detected, rebuilding…");
-        if let Err(e) = build_all(&config, args.strict) {
+        if let Err(e) = args.build(&config) {
             eprintln!("error: {e:#}");
         }
     }

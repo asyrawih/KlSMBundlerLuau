@@ -5,6 +5,9 @@ external = ["ReplicatedStorage"]
 # AddonLoader scans Addon/*/Features at runtime; a copy goes in each bundle so it can
 # require the bundled addons through the `script` stand-in.
 internal = ["ReplicatedStorage.AddonLoader"]
+# One folder per feature in each of these; client profiles (clients/<name>.toml) switch
+# features off by folder name. `*` = the side (Server / Client / Shared).
+features = "Addon/*/Features"
 
 [[bundle]]
 entry  = "ServerScriptService/Server/Main.server.luau"

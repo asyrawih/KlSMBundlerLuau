@@ -1,0 +1,10 @@
+disabled = [
+    "Affiliate",
+    "Banner",
+    "Crown",
+    "Donation",
+    "Economy",
+    "LoadingScreen",
+    "MimicParty",
+    "Voice",
+]

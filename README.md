@@ -100,6 +100,44 @@ original place, since the bundle Script itself lives elsewhere; other uses of `s
 the bundle Script. A `not statically resolvable` warning in an included module usually means
 another folder for `include`. `--include <glob>` / `--internal <path>` do the same for single-entry builds.
 
+## Client profiles
+
+Some clients don't get every feature. With `features = "Addon/*/Features"` in `bundle.toml` (one
+folder per feature inside each match; the `*` part names the side), a profile in
+`clients/<name>.toml` lists the features that client doesn't get:
+
+```toml
+disabled = ["Affiliate", "MimicParty"]
+```
+
+`klsm build --client <name>` excludes those folders from every bundle and writes everything to
+`dist/<name>/`, ending with **one model, `<name>.rbxmx`**, to drop into ServerScriptService:
+
+```
+KlsmPackage
+├─ Loader               server bundle; starts with a small installer
+└─ ReplicatedStorage    client bundle (Script, RunContext Client) + every module under
+                        `external` this client gets, e.g. Addon/Features without the
+                        switched-off features
+```
+
+When the server starts, the installer merges each service-named folder into that service:
+scripts and modules replace same-named ones, folders merge (Studio-only content in them stays), and
+a feature folder (`features` under `external`, marked `KlsmExact`) also loses features the package
+doesn't have, so nothing has to be deleted from the client's place by hand. Replace the old package
+when updating. A module that's excluded but still required statically by something bundled is
+bundled anyway, with a warning naming who requires it.
+
+### Desktop app
+
+`app/` is a Tauri front-end for the same thing: open a `bundle.toml`, add clients, switch features
+on or off (saved to `clients/<name>.toml` as you click), build, and show the package in Finder.
+
+```sh
+cd app && cargo tauri dev      # run
+cd app && cargo tauri build    # KlSM Bundler.app + .dmg in app/target/release/bundle
+```
+
 ## Runtime behaviour
 
 - Each module runs once and is cached, like Roblox `require`.

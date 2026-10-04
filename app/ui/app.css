@@ -1,0 +1,51 @@
+/* App layout on top of the brand CSS (tokens/base/components from the Unrest kit). */
+html, body { height: 100%; }
+body { overflow: hidden; display: flex; flex-direction: column; }
+code { font-family: var(--us-font-mono); font-size: .9em; color: var(--us-text); }
+.muted { color: var(--us-text-muted); font-size: var(--us-fs-body-sm); }
+.input--sm { height: 36px; padding: 0 12px; font-size: 13px; }
+.icon-btn svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+
+/* Title bar: macOS traffic lights sit in the first 80px. */
+.topbar { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 16px 0 88px; border-bottom: 1px solid var(--us-hair); background: var(--us-void); flex: none; }
+.topbar .logo { font-size: 15px; }
+.topbar__app { font-family: var(--us-font-mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--us-text-subtle); padding-left: 12px; border-left: 1px solid var(--us-hair-strong); }
+.project { margin-left: auto; display: flex; gap: 8px; width: min(520px, 50vw); }
+.project .input { flex: 1; font-family: var(--us-font-mono); font-size: 12px; }
+
+.shell { flex: 1; display: grid; grid-template-columns: 232px 1fr; min-height: 0; }
+.sidebar { border-right: 1px solid var(--us-hair); padding: 20px 12px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.sidebar h6 { padding: 0 8px; }
+.clients { display: flex; flex-direction: column; gap: 2px; overflow: auto; flex: 1; }
+.clients button { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--us-r-md); background: none; color: var(--us-text-muted); font-size: 14px; font-weight: 500; text-align: left; }
+.clients button:hover { background: var(--us-wash); color: var(--us-text); }
+.clients button[aria-current="true"] { background: var(--us-surface-2); border-color: var(--us-hair-strong); color: var(--us-text); }
+.clients button[aria-current="true"]::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--us-primary); box-shadow: 0 0 8px var(--us-primary); }
+.new-client { display: flex; gap: 6px; }
+.new-client .input { flex: 1; min-width: 0; font-family: var(--us-font-mono); }
+
+.main { overflow: auto; padding: 28px 32px 32px; display: flex; flex-direction: column; gap: 24px; }
+.empty { margin: auto; max-width: 420px; }
+.empty__icon { color: var(--us-tertiary); }
+.empty__icon .logogram { width: 40px; height: auto; }
+
+.client { display: flex; flex-direction: column; gap: 20px; }
+.client__head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.client__head h2 { font-size: var(--us-fs-h3); margin: 4px 0 6px; }
+.client__actions { display: flex; gap: 8px; align-items: center; }
+
+.features { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.feature { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px; border-radius: var(--us-r-lg); cursor: pointer; transition: border-color var(--us-dur-fast), opacity var(--us-dur-fast); }
+.feature:hover { border-color: var(--us-hair-strong); }
+.feature__name { font-family: var(--us-font-display); font-weight: 600; font-size: 16px; letter-spacing: -.01em; }
+.feature__sides { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+.feature__sides .tag { height: 20px; padding: 0 8px; font-size: 10px; }
+.feature.is-off { opacity: .5; }
+.feature.is-off .feature__name { text-decoration: line-through; text-decoration-color: var(--us-text-subtle); }
+
+.log { display: flex; flex-direction: column; gap: 12px; }
+.log__head { display: flex; align-items: center; justify-content: space-between; }
+.log__body { margin: 0; padding: 16px; border-radius: var(--us-r-lg); background: var(--us-void); border: 1px solid var(--us-hair); font-family: var(--us-font-mono); font-size: 12px; line-height: 1.7; color: var(--us-text-muted); white-space: pre-wrap; word-break: break-word; max-height: 280px; overflow: auto; }
+.log__body .ok { color: var(--us-success); }
+.log__body .warn { color: var(--us-warning); }
+.log__body .err { color: var(--us-error); }

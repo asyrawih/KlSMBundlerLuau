@@ -123,6 +123,8 @@ pub struct Options<'a> {
     pub include: &'a [String],
     /// Globs removed from what `include` matched.
     pub exclude: &'a [String],
+    /// Luau emitted right after the `--!` directives, before the runtime.
+    pub prologue: &'a str,
 }
 
 impl Options<'_> {
@@ -349,6 +351,29 @@ pub fn bundle(opts: &Options) -> Bundle {
         .iter()
         .filter_map(|u| u.id.map(|id| (u.node, id)))
         .collect();
+    // `exclude` only filters `include`; a static require still pulls an excluded module in.
+    for (pattern, file, id) in opts.exclude.iter().flat_map(|p| {
+        matching(tree, "exclude", p, &mut Vec::new())
+            .into_iter()
+            .map(move |(f, id)| (p, f, id))
+    }) {
+        if id == opts.entry || !id_of.contains_key(&id) {
+            continue;
+        }
+        let by: Vec<&str> = units
+            .iter()
+            .filter(|u| u.deps.contains(&id))
+            .map(|u| u.file.as_str())
+            .collect();
+        diags.push(warning(
+            &file,
+            0,
+            format!(
+                "excluded by {pattern:?} but still bundled: required by {}",
+                by.join(", ")
+            ),
+        ));
+    }
     // A `script` path is fine in a module when the stand-in can find bundled modules there.
     let mut around_bundled = HashSet::new();
     for &node in id_of.keys() {
@@ -591,6 +616,14 @@ fn emit(
             entry.file,
             id_of.len()
         ));
+    }
+
+    if !opts.prologue.is_empty() {
+        glue(
+            &mut out,
+            squash(opts.prologue, "<prologue>").trim_end_matches('\n'),
+        );
+        out.push('\n');
     }
 
     let needs_proxy = units.iter().any(|u| {

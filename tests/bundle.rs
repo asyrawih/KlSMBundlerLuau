@@ -20,6 +20,7 @@ fn build(fixture: &str, entry: &str, minify: Minify) -> Bundle {
         internal: &[],
         include: &[],
         exclude: &[],
+        prologue: "",
     })
 }
 
@@ -214,6 +215,7 @@ fn real_project() {
                 internal: &[],
                 include: &[],
                 exclude: &[],
+                prologue: "",
             })
         };
         let plain = make(Minify::None);
@@ -292,6 +294,7 @@ fn luaurc_aliases_resolve() {
         internal: &[],
         include: &[],
         exclude: &[],
+        prologue: "",
     });
     assert!(
         !b.has_errors() && b.diagnostics.is_empty(),
@@ -401,6 +404,7 @@ fn external_modules_stay_in_the_game() {
         internal: &[],
         include: &[],
         exclude: &[],
+        prologue: "",
     });
     assert!(!b.has_errors(), "{}", diagnostics(&b));
     // Pkg (with its lib), Lazy.A and Lazy.B are no longer bundled (10 -> 6).
@@ -436,6 +440,7 @@ fn build_addons(include: &[String], minify: Minify) -> Bundle {
         internal: &["ReplicatedStorage.AddonLoader".to_string()],
         include,
         exclude: &[],
+        prologue: "",
     })
 }
 
@@ -493,6 +498,7 @@ fn exclude_removes_included_modules() {
             "ServerScriptService/Addon/Features/Alpha/*".to_string(),
             "ServerScriptService/Addon/Features/Typo/*".to_string(),
         ],
+        prologue: "",
     });
     assert!(!b.has_errors(), "{}", diagnostics(&b));
     // Alpha's service (and so its helper) is gone: 8 -> 6.
@@ -554,4 +560,218 @@ fn addon_loader_runs_under_luau() {
             "{level:?}"
         );
     }
+}
+
+#[test]
+fn excluded_module_required_statically_warns() {
+    let tree = Tree::load(Path::new("tests/fixtures/addons"), None).unwrap();
+    let entry = tree
+        .find_file(Path::new("ServerScriptService/Server/Main.server.luau"))
+        .unwrap();
+    let b = bundle::bundle(&Options {
+        tree: &tree,
+        aliases: &Aliases::new(),
+        entry,
+        minify: Minify::None,
+        script_name: "Bundle".into(),
+        external: &["ReplicatedStorage".to_string()],
+        internal: &["ReplicatedStorage.AddonLoader".to_string()],
+        include: &["ServerScriptService/Addon/Features/*/*Service.luau".to_string()],
+        exclude: &["ServerScriptService/Addon/Features/Alpha/AlphaHelper.luau".to_string()],
+        prologue: "",
+    });
+    assert!(diagnostics(&b).contains(
+        "AlphaHelper.luau: excluded by \"ServerScriptService/Addon/Features/Alpha/AlphaHelper.luau\" but still bundled: required by ServerScriptService/Addon/Features/Alpha/AlphaService.luau"
+    ), "{}", diagnostics(&b));
+}
+
+#[test]
+fn client_profiles_exclude_features_and_redirect_output() {
+    use klsm_bundler::config::{Config, Target as BundleTarget};
+    use klsm_bundler::profile::{self, Profile};
+    let dir = std::env::temp_dir().join(format!("klsm-profile-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let config_path = dir.join("bundle.toml");
+    let make = || Config {
+        root: Path::new("tests/fixtures/addons").canonicalize().unwrap(),
+        sourcemap: None,
+        regenerate_sourcemap: false,
+        minify: Minify::None,
+        external: vec!["ReplicatedStorage".into()],
+        internal: vec!["ReplicatedStorage.AddonLoader".into()],
+        features: Some("*/Addon/Features".into()),
+        bundles: vec![BundleTarget {
+            entry: "ServerScriptService/Server/Main.server.luau".into(),
+            output: "/somewhere/Loader.server.luau".into(),
+            rbxmx: Some("/somewhere/Server.rbxmx".into()),
+            minify: None,
+            name: None,
+            external: vec![],
+            internal: vec![],
+            include: vec!["ServerScriptService/Addon/Features/*/*Service.luau".into()],
+            exclude: vec![],
+            prologue: None,
+        }],
+    };
+
+    let names: Vec<String> = profile::features(&make())
+        .unwrap()
+        .into_iter()
+        .map(|f| format!("{}:{}", f.name, f.sides.join("+")))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Alpha:ReplicatedStorage+ServerScriptService",
+            "Beta:ReplicatedStorage+ServerScriptService",
+            "Broken:ServerScriptService",
+            "Gamma:ServerScriptService"
+        ]
+    );
+
+    let acme = Profile {
+        disabled: vec!["Beta".into(), "Alpha".into()],
+    };
+    profile::save(&config_path, "acme", &acme).unwrap();
+    assert!(profile::save(&config_path, "../evil", &acme).is_err());
+    assert_eq!(profile::list(&config_path).unwrap(), ["acme"]);
+    let loaded = profile::load(&config_path, "acme").unwrap();
+    assert_eq!(loaded.disabled, ["Alpha", "Beta"]);
+
+    let mut config = make();
+    profile::apply(&mut config, &config_path, "acme", &loaded).unwrap();
+    let target = &config.bundles[0];
+    assert_eq!(target.output, dir.join("dist/acme/Loader.server.luau"));
+    // One package replaces the per-bundle model; the server bundle carries its installer.
+    assert_eq!(target.rbxmx, None);
+    assert!(target.prologue.as_deref().unwrap().contains("KlsmExact"));
+
+    let tree = Tree::load(&config.root, None).unwrap();
+    let entry = tree.find_file(&target.entry).unwrap();
+    let b = bundle::bundle(&Options {
+        tree: &tree,
+        aliases: &Aliases::new(),
+        entry,
+        minify: Minify::None,
+        script_name: "Bundle".into(),
+        external: &config.external,
+        internal: &config.internal,
+        include: &target.include,
+        exclude: &target.exclude,
+        prologue: "",
+    });
+    assert!(!b.has_errors(), "{}", diagnostics(&b));
+    // Only Broken's service is left besides Addons + AddonLoader.
+    assert!(
+        !b.inputs
+            .iter()
+            .any(|f| f.contains("/Alpha/") || f.contains("/Beta/"))
+    );
+    assert_eq!(b.module_count, 3);
+
+    // The one-file package: server Loader first, then ReplicatedStorage with what this client
+    // gets. Alpha and Beta are off, so neither of their Shared configs ships.
+    assert!(klsm_bundler::build_all(&config, false, &mut |_| {}).unwrap());
+    let package = profile::write_package(&config, &config_path, "acme").unwrap();
+    assert_eq!(package, dir.join("dist/acme/acme.rbxmx"));
+    let xml = std::fs::read_to_string(&package).unwrap();
+    let names: Vec<&str> = xml
+        .match_indices("<string name=\"Name\">")
+        .map(|(i, m)| {
+            let rest = &xml[i + m.len()..];
+            &rest[..rest.find('<').unwrap()]
+        })
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "KlsmPackage",
+            "Loader",
+            "ReplicatedStorage",
+            "Addon",
+            "Features",
+            "AddonLoader"
+        ]
+    );
+    assert!(xml.contains("<token name=\"RunContext\">1</token>"));
+    assert!(xml.contains("KlSM package installer"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn package_ships_enabled_shared_features_only() {
+    use klsm_bundler::config::{Config, Target as BundleTarget};
+    use klsm_bundler::profile::{self, Profile};
+    let dir = std::env::temp_dir().join(format!("klsm-package-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let config_path = dir.join("bundle.toml");
+    let mut config = Config {
+        root: Path::new("tests/fixtures/addons").canonicalize().unwrap(),
+        sourcemap: None,
+        regenerate_sourcemap: false,
+        minify: Minify::Full,
+        external: vec!["ReplicatedStorage".into()],
+        internal: vec!["ReplicatedStorage.AddonLoader".into()],
+        features: Some("*/Addon/Features".into()),
+        bundles: vec![BundleTarget {
+            entry: "ServerScriptService/Server/Main.server.luau".into(),
+            output: "Loader.server.luau".into(),
+            rbxmx: None,
+            minify: None,
+            name: None,
+            external: vec![],
+            internal: vec![],
+            include: vec!["ServerScriptService/Addon/Features/*/*Service.luau".into()],
+            exclude: vec![],
+            prologue: None,
+        }],
+    };
+    let solo = Profile {
+        disabled: vec!["Beta".into()],
+    };
+    profile::apply(&mut config, &config_path, "solo", &solo).unwrap();
+    assert!(klsm_bundler::build_all(&config, false, &mut |_| {}).unwrap());
+    let package = profile::write_package(&config, &config_path, "solo").unwrap();
+    let xml = std::fs::read_to_string(package).unwrap();
+    assert!(xml.contains("AlphaConfig"));
+    assert!(
+        !xml.contains("BetaConfig"),
+        "a disabled feature's Shared config must not ship"
+    );
+    // Only Features is marked: count 1, "KlsmExact" (9 bytes), type 3 (bool), true.
+    assert_eq!(xml.matches("AttributesSerialize").count(), 1);
+    let features = xml.find("<string name=\"Name\">Features</string>").unwrap();
+    let attr = xml.find(">AQAAAAkAAABLbHNtRXhhY3QDAQ==<").unwrap();
+    assert!(attr > features && attr - features < 120);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Runs src/installer.luau against a mock place: `LUAU_BIN=… cargo test installer_runs_under_luau`.
+#[test]
+fn installer_runs_under_luau() {
+    let Ok(luau) = std::env::var("LUAU_BIN") else {
+        return;
+    };
+    let harness = std::fs::read_to_string("tests/installer_harness.luau").unwrap();
+    let installer = std::fs::read_to_string("src/installer.luau").unwrap();
+    let dir = std::env::temp_dir().join(format!("klsm-installer-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("installer.luau");
+    std::fs::write(&file, harness.replace("--@@INSTALLER@@", &installer)).unwrap();
+    let out = std::process::Command::new(&luau)
+        .arg(&file)
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // Old modules replaced, Studio-only content kept (EffectDonation, Alpha.Assets), the
+    // switched-off feature (Gone) removed, the client Loader in place, the package emptied.
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "Addon,AddonLoader,EffectDonation,Loader\tAlpha\tAlphaConfig,Assets\tnew\tnew\tclient\tLoader\n"
+    );
 }

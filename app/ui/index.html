@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KlSM Bundler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="logogram" viewBox="0 0 1011 900"><path fill-rule="evenodd" fill="currentColor" d="M512.0 476.0 L511.0 484.0 L511.0 693.0 L384.0 814.5 L343.5 852.0 L325.0 870.5 L305.5 888.0 L297.0 896.5 L297.0 897.5 L504.0 897.5 L598.0 809.0 L720.5 691.0 L720.5 690.0 L649.5 617.5 L630.5 597.0Z M0.0 40.0 L0.0 660.5 L5.0 697.0 L11.0 720.5 L19.0 743.0 L26.0 758.5 L34.0 773.5 L45.0 791.0 L58.0 808.0 L71.0 822.5 L90.5 841.0 L108.5 855.0 L125.5 866.0 L142.0 875.0 L161.5 883.5 L184.0 891.0 L203.5 895.5 L224.5 898.5 L244.0 899.5 L256.0 898.0 L263.0 892.5 L294.5 863.0 L380.5 780.0 L435.0 729.0 L443.5 720.0 L453.0 712.0 L486.5 679.0 L488.0 672.0 L487.5 342.0 L486.0 338.0 L482.5 333.5 L462.5 312.5 L340.0 188.5 L335.0 184.5 L323.5 172.5 L318.5 169.0 L317.5 177.0 L317.5 757.5 L311.0 759.0 L302.5 759.0 L277.0 756.0 L255.5 750.0 L232.5 739.0 L223.0 733.0 L207.5 720.0 L200.5 713.0 L187.0 696.0 L176.5 676.5 L170.5 661.5 L164.5 631.5 L163.5 206.0 L159.5 198.5 L152.0 189.5 L35.0 73.5Z M149.0 0.0 L285.5 136.0 L759.0 136.0 L772.0 137.5 L789.0 143.0 L805.0 153.0 L812.5 160.5 L821.0 171.5 L829.0 189.5 L832.0 205.5 L832.0 217.0 L830.0 229.0 L823.0 247.5 L817.0 257.0 L809.0 266.5 L793.0 279.5 L778.0 287.0 L762.0 291.5 L748.0 293.0 L489.0 293.0 L593.5 398.5 L805.0 617.5 L821.5 635.5 L835.0 653.5 L842.0 666.5 L846.0 676.5 L849.0 687.5 L851.0 702.0 L851.0 719.0 L849.0 732.5 L844.0 749.0 L840.0 758.5 L832.0 773.0 L821.5 788.0 L811.0 800.5 L797.0 815.0 L782.0 829.0 L758.5 848.0 L737.0 863.0 L710.0 879.5 L671.5 898.0 L804.0 898.0 L821.0 896.5 L839.0 893.5 L867.0 885.0 L894.5 872.5 L918.0 858.0 L934.5 845.5 L949.0 832.5 L965.5 815.0 L981.5 794.0 L996.5 766.5 L1005.5 741.5 L1009.5 720.0 L1010.5 710.0 L1010.5 691.5 L1006.5 664.5 L1000.5 642.0 L993.5 623.5 L982.5 601.0 L965.5 574.5 L955.5 561.5 L941.5 545.5 L857.0 460.0 L800.0 400.0 L801.5 399.0 L807.0 399.0 L830.0 395.5 L856.0 389.0 L884.0 377.5 L894.0 372.5 L910.0 362.5 L933.0 344.0 L950.5 325.0 L967.5 300.0 L977.5 279.5 L985.5 255.0 L990.5 226.0 L991.0 195.0 L986.5 162.5 L979.5 138.5 L966.5 110.5 L952.5 89.0 L933.5 66.5 L924.0 57.0 L903.0 40.0 L884.0 28.0 L866.0 19.0 L854.0 14.0 L827.5 6.0 L809.5 2.5 L787.0 0.0Z"/></symbol>
+</svg>
+
+<header class="topbar" data-tauri-drag-region>
+  <span class="logo" data-tauri-drag-region><svg class="logogram" aria-hidden="true"><use href="#logogram"/></svg><span class="logo__text">UNREST STUDIO</span></span>
+  <span class="topbar__app" data-tauri-drag-region>Bundler</span>
+  <form class="project" id="projectForm">
+    <input class="input input--sm" id="configPath" placeholder="/path/to/bundle.toml" spellcheck="false" autocomplete="off" aria-label="bundle.toml path">
+    <button class="btn btn--secondary btn--sm" type="submit">Open</button>
+  </form>
+</header>
+
+<div class="shell">
+  <aside class="sidebar">
+    <h6>Clients</h6>
+    <nav class="clients" id="clients"></nav>
+    <form class="new-client" id="newClient">
+      <input class="input input--sm" id="newName" placeholder="new-client" pattern="[A-Za-z0-9_\-]+" title="Letters, digits, - and _" autocomplete="off" aria-label="New client name">
+      <button class="icon-btn icon-btn--sm" type="submit" aria-label="Add client"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+    </form>
+  </aside>
+
+  <main class="main" id="main">
+    <div class="empty" id="emptyState">
+      <div class="empty__icon card--underglow"><svg class="logogram" aria-hidden="true"><use href="#logogram"/></svg></div>
+      <h3 id="emptyTitle">Open a bundle.toml</h3>
+      <p class="muted" id="emptyBody">Paste its path above. It needs <code>features = "Addon/*/Features"</code>.</p>
+    </div>
+
+    <section class="client" id="clientView" hidden>
+      <div class="client__head">
+        <div>
+          <h6>Client</h6>
+          <h2 id="clientName"></h2>
+          <p class="muted" id="clientSummary"></p>
+        </div>
+        <div class="client__actions">
+          <button class="btn btn--ghost btn--sm" id="allOn" type="button">Enable all</button>
+          <button class="btn btn--primary btn--glow" id="buildBtn" type="button">Build bundle</button>
+        </div>
+      </div>
+      <div class="features" id="features"></div>
+    </section>
+
+    <section class="log" id="logPanel" hidden>
+      <div class="log__head">
+        <span class="status" id="logStatus"></span>
+        <button class="btn btn--text" id="reveal" type="button" hidden>Show in Finder ↗</button>
+      </div>
+      <div id="leftovers"></div>
+      <pre class="log__body" id="logBody"></pre>
+    </section>
+  </main>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

@@ -26,6 +26,9 @@ pub struct Config {
     /// (`["ReplicatedStorage.AddonLoader"]`).
     #[serde(default)]
     pub internal: Vec<String>,
+    /// Folders holding one folder per feature, from `root` (`Addon/*/Features`); the
+    /// wildcard parts name the sides. Used by client profiles (`clients/<name>.toml`).
+    pub features: Option<String>,
     #[serde(rename = "bundle", default)]
     pub bundles: Vec<Target>,
 }
@@ -56,6 +59,9 @@ pub struct Target {
     /// Globs taken out of what `include` matched (`Addon/Server/Features/Affiliate/*`).
     #[serde(default)]
     pub exclude: Vec<String>,
+    /// Luau run before the bundle runtime (a client package's installer); set in code only.
+    #[serde(skip)]
+    pub prologue: Option<String>,
 }
 
 impl Target {
