@@ -3,7 +3,7 @@ source: tests/bundle.rs
 expression: b.code
 ---
 --!nocheck
--- Bundled by KlSMBundlerLuau 1.2.1 from ServerScriptService/Server/Main.server.luau (2 modules). Generated file: edit the sources, not this.
+-- Bundled by KlSMBundlerLuau 1.2.2 from ServerScriptService/Server/Main.server.luau (2 modules). Generated file: edit the sources, not this.
 local __KLSM_modules = {}
 local __KLSM_names = {}
 local __KLSM_cache = {}

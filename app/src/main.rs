@@ -20,6 +20,8 @@ struct Project {
     clients: Vec<String>,
     /// `[place] id`: client builds download this place's assets with the Open Cloud key.
     place_id: Option<u64>,
+    /// `[place] assets`: instance paths copied from the place into client packages.
+    place_assets: Vec<String>,
     has_api_key: bool,
 }
 
@@ -50,7 +52,8 @@ fn open_project(config: String) -> Res<Project> {
         root: cfg.root.display().to_string(),
         features: profile::features(&cfg).map_err(err)?,
         clients: profile::list(&path).map_err(err)?,
-        place_id: cfg.place.map(|p| p.id),
+        place_id: cfg.place.as_ref().map(|p| p.id),
+        place_assets: cfg.place.map(|p| p.assets).unwrap_or_default(),
         has_api_key: place::api_key(config_dir(&path)).is_ok(),
     })
 }
@@ -63,15 +66,39 @@ fn config_dir(config: &Path) -> &Path {
 /// is added with no assets yet.
 #[tauri::command]
 fn save_place(config: String, id: u64) -> Res<()> {
-    let text = std::fs::read_to_string(&config).map_err(|e| e.to_string())?;
+    edit_place(&config, |place| place["id"] = toml_edit::value(id as i64))
+}
+
+/// Replaces `[place] assets`; needs the place ID first, or bundle.toml would stop loading.
+#[tauri::command]
+fn save_place_assets(config: String, assets: Vec<String>) -> Res<()> {
+    if Config::load(Path::new(&config))
+        .map_err(err)?
+        .place
+        .is_none()
+    {
+        return Err("Save the place ID first.".into());
+    }
+    edit_place(&config, |place| {
+        place["assets"] = toml_edit::value(assets.iter().collect::<toml_edit::Array>())
+    })
+}
+
+/// Applies `change` to `[place]` (added, with no assets, when missing) and writes it back.
+fn edit_place(config: &str, change: impl FnOnce(&mut toml_edit::Table)) -> Res<()> {
+    let text = std::fs::read_to_string(config).map_err(|e| e.to_string())?;
     let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| format!("{e}"))?;
     if !doc.contains_table("place") {
         let mut table = toml_edit::Table::new();
         table["assets"] = toml_edit::value(toml_edit::Array::new());
         doc["place"] = toml_edit::Item::Table(table);
     }
-    doc["place"]["id"] = toml_edit::value(id as i64);
-    std::fs::write(&config, doc.to_string()).map_err(|e| e.to_string())
+    change(
+        doc["place"]
+            .as_table_mut()
+            .ok_or("[place] is not a table")?,
+    );
+    std::fs::write(config, doc.to_string()).map_err(|e| e.to_string())
 }
 
 /// Stores the Open Cloud key next to `bundle.toml`, readable by the owner only.
@@ -150,6 +177,7 @@ fn main() {
             save_client,
             build,
             save_place,
+            save_place_assets,
             save_api_key,
             reveal
         ])
@@ -176,6 +204,25 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("\"ReplicatedStorage.A\""), "{text}");
+        // save_place_assets loads bundle.toml, which needs a real root.
+        let root = dir.join("root");
+        std::fs::create_dir_all(&root).unwrap();
+        let toml = text.replace(
+            "root = \"x\"",
+            &format!("root = {:?}", root.display().to_string()),
+        );
+        std::fs::write(&file, toml).unwrap();
+        super::save_place_assets(
+            path.clone(),
+            vec!["Workspace.Map".into(), "ServerStorage.Models".into()],
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            text.contains("assets = [\"Workspace.Map\", \"ServerStorage.Models\"]"),
+            "{text}"
+        );
+        assert!(text.contains("# sync"), "{text}");
 
         std::fs::write(
             &file,

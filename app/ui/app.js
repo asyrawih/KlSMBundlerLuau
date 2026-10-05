@@ -58,12 +58,50 @@ async function openProject(path) {
 function renderPlace() {
   $("placeForm").hidden = false;
   $("placeId").value = project.place_id ?? "";
-  $("apiKey").placeholder = project.has_api_key ? "API key saved (paste to replace)" : "Open Cloud API key";
+  $("apiKey").placeholder = project.has_api_key ? "Key saved · paste new" : "Open Cloud API key";
+  renderAssets();
   $("placeStatus").textContent = !project.place_id
     ? "Set a place to ship its Studio assets."
     : project.has_api_key
       ? "Client builds download this place's assets."
       : "Add an API key to download the place.";
+}
+
+// Instance paths shipped from the place (any service: Workspace, ServerStorage, …).
+function renderAssets() {
+  $("assetsBox").hidden = !project.place_id;
+  const rows = project.place_assets.map((path) => {
+    const li = document.createElement("li");
+    const text = document.createElement("span");
+    text.title = path;
+    const cut = path.lastIndexOf(".");
+    const name = document.createElement("strong");
+    name.textContent = path.slice(cut + 1);
+    const parent = document.createElement("small");
+    parent.textContent = path.slice(0, cut);
+    text.append(name, parent);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "icon-btn icon-btn--sm";
+    remove.setAttribute("aria-label", `Remove ${path}`);
+    remove.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    remove.onclick = () => saveAssets(project.place_assets.filter((p) => p !== path));
+    li.append(text, remove);
+    return li;
+  });
+  if (!rows.length) {
+    const li = document.createElement("li");
+    li.className = "muted empty-row";
+    li.textContent = "Nothing yet. Add Service.Path below.";
+    rows.push(li);
+  }
+  $("assetList").replaceChildren(...rows);
+}
+
+async function saveAssets(assets) {
+  await call("save_place_assets", { config, assets });
+  project.place_assets = assets;
+  renderAssets();
 }
 
 function renderClients() {
@@ -247,6 +285,14 @@ $("placeForm").onsubmit = async (e) => {
   }
   renderPlace();
   toast("Saved.", "ok");
+};
+
+$("newAsset").onsubmit = async (e) => {
+  e.preventDefault();
+  const path = $("newAssetPath").value.trim().replace(/^game\./, "");
+  if (!path) return;
+  if (!project.place_assets.includes(path)) await saveAssets([...project.place_assets, path]);
+  $("newAssetPath").value = "";
 };
 
 $("buildBtn").onclick = build;

@@ -6,8 +6,8 @@ use crate::tree::{NodeId, ROOT, Tree};
 use full_moon::LuaVersion;
 use full_moon::ast::luau::{ExportedTypeDeclaration, ExportedTypeFunction, TypeInfo};
 use full_moon::ast::{
-    BinOp, Call, Expression, Field, FunctionArgs, FunctionCall, GenericFor, Index, LocalAssignment,
-    Prefix, Suffix, Var, VarExpression,
+    BinOp, Call, Expression, Field, FunctionArgs, FunctionBody, FunctionCall, GenericFor, Index,
+    LocalAssignment, Prefix, Suffix, Var, VarExpression,
 };
 use full_moon::node::Node;
 use full_moon::tokenizer::{TokenReference, TokenType};
@@ -40,6 +40,11 @@ pub struct RequireSite {
     /// Never executed in Roblox: inside a type annotation (`typeof(require(...))`) or
     /// behind a `game and x or require(...)` fallback for non-Roblox runtimes.
     pub never_runs: bool,
+    /// Inside a function body, so it runs when that function is called rather than when the
+    /// module loads. A top-level `(function() ... end)()` still counts as load time.
+    /// ponytail: a local function called at the top level (`local x = build()`) is still
+    /// counted as lazy; track top-level calls of local functions if that ever hides a cycle.
+    pub lazy: bool,
 }
 
 #[derive(Debug, Default)]
@@ -109,6 +114,8 @@ pub fn analyze(
         aliases,
         env: HashMap::new(),
         type_depth: 0,
+        functions: Vec::new(),
+        iife_bodies: Vec::new(),
         out: Analysis::default(),
         script_tokens: Vec::new(),
         path_ranges: Vec::new(),
@@ -160,6 +167,10 @@ struct Analyzer<'a> {
     aliases: &'a Aliases,
     env: HashMap<String, Target>,
     type_depth: usize,
+    /// One entry per function body being walked: false for a top-level-style IIFE body.
+    functions: Vec<bool>,
+    /// Start bytes of `(function() ... end)()` bodies, which run right away.
+    iife_bodies: Vec<usize>,
     out: Analysis,
     script_tokens: Vec<(usize, usize)>,
     /// Alias definitions that resolved to a tree node (`local UI = script.Parent.UI`).
@@ -377,7 +388,23 @@ impl Analyzer<'_> {
 
 impl Visitor for Analyzer<'_> {
     fn visit_function_call(&mut self, call: &FunctionCall) {
+        if let Prefix::Expression(expr) = call.prefix()
+            && let Expression::Function(f) = unparen(expr)
+            && let Some(start) = f.body().start_position()
+        {
+            self.iife_bodies.push(start.bytes());
+        }
         self.require_call(call.prefix(), call.suffixes().next());
+    }
+
+    fn visit_function_body(&mut self, body: &FunctionBody) {
+        let start = body.start_position().map(|p| p.bytes());
+        let iife = start.is_some_and(|s| self.iife_bodies.contains(&s));
+        self.functions.push(!iife);
+    }
+
+    fn visit_function_body_end(&mut self, _: &FunctionBody) {
+        self.functions.pop();
     }
 
     /// `require(x).Field` parses as a var expression, not a call.
@@ -537,6 +564,7 @@ impl Analyzer<'_> {
             text: String::new(),
             target,
             never_runs: self.type_depth > 0 || self.dead_ranges.iter().any(|r| r.contains(&start)),
+            lazy: self.functions.contains(&true),
         });
     }
 

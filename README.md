@@ -138,6 +138,9 @@ id = 82391043752226
 assets = ["ReplicatedStorage.EffectDonation", "ReplicatedStorage.Asset"]
 ```
 
+Paths can start at any service (`Workspace.Map`, `ServerStorage.Models`); the installer merges each
+into its service. The desktop app edits the place ID, the key and this list (sidebar, *Roblox place*).
+
 The Open Cloud API key comes from `ROBLOX_API_KEY`, or a `.roblox-api-key` file next to
 `bundle.toml` (gitignored; the desktop app doesn't see shell variables). Save the place in Studio
 before building, or the package gets the previous version. Without a key (or offline), export by hand instead: in Studio, right-click the instance → *Save to File* and save
@@ -164,8 +167,12 @@ cd app && cargo tauri build    # KlSM Bundler.app + .dmg in app/target/release/b
 ## Runtime behaviour
 
 - Each module runs once and is cached, like Roblox `require`.
-- Loading a module that is already loading raises `Requested module was required recursively`;
-  static cycles are only warned about, because lazy requires inside functions are fine.
+- Loading a module that is already loading raises `Requested module was required recursively`,
+  as in Roblox. A cycle is only warned about when every require in it runs at load time (top
+  level, including top-level `if`/`do`/loops and `(function() … end)()`); one require inside a
+  function body or callback makes it lazy and fine. The warning names each require's line:
+  `circular eager require A (A.luau:12) -> B (B.luau:5) -> A`. A local function called at the
+  top level still counts as lazy.
 - A module that doesn't return exactly one value raises Roblox's error message.
 - Requires inside type annotations (`typeof(require(x))`) are left alone and don't pull modules in.
 - `export type` is turned into `type` (exports are illegal inside the wrapper function).

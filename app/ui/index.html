@@ -41,6 +41,14 @@
       <input class="input input--sm" id="apiKey" type="password" placeholder="Open Cloud API key" autocomplete="off" spellcheck="false" aria-label="Roblox Open Cloud API key">
       <button class="btn btn--secondary btn--sm" type="submit">Save</button>
     </form>
+    <div class="assets" id="assetsBox" hidden>
+      <h6>Place assets</h6>
+      <ul class="assets__list" id="assetList"></ul>
+      <form class="new-client" id="newAsset">
+        <input class="input input--sm" id="newAssetPath" placeholder="Workspace.Map" autocomplete="off" spellcheck="false" pattern="[^.]+\..+" title="Service.Path, e.g. ServerStorage.Models" aria-label="Instance path to ship">
+        <button class="icon-btn icon-btn--sm" type="submit" aria-label="Add asset path"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+      </form>
+    </div>
   </aside>
 
   <main class="main" id="main">

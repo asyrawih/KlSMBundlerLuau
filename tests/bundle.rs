@@ -864,3 +864,73 @@ fn place_assets_land_under_their_service_folder() {
     let bare = vec!["EffectDonation".to_string()];
     assert!(klsm_bundler::place::copy_assets(&mut place, &bare, &mut package, root).is_err());
 }
+
+/// Only cycles of requires that run at load time are reported (with each require's line);
+/// one lazy require anywhere in the cycle makes it fine, as in Roblox.
+#[test]
+fn only_eager_cycles_are_reported() {
+    let cycles = |dir: &str| -> Vec<String> {
+        build(
+            "cycles",
+            &format!("ReplicatedStorage/{dir}/A.luau"),
+            Minify::None,
+        )
+        .diagnostics
+        .iter()
+        .map(|d| d.to_string())
+        .filter(|d| d.contains("circular"))
+        .collect()
+    };
+    assert_eq!(
+        cycles("Eager"),
+        [
+            "warning: ReplicatedStorage/Eager/A.luau:1: circular eager require A (A.luau:1) -> B (B.luau:1) -> A; Roblox fails this with \"required recursively\""
+        ]
+    );
+    assert_eq!(
+        cycles("If").len(),
+        1,
+        "require inside a top-level if is eager"
+    );
+    assert_eq!(
+        cycles("Iife").len(),
+        1,
+        "a top-level IIFE runs at load time"
+    );
+    assert!(cycles("Connect").is_empty(), "a callback runs later");
+    assert!(
+        build(
+            "basic",
+            "ReplicatedStorage/Shared/Lazy/A.luau",
+            Minify::None
+        )
+        .diagnostics
+        .iter()
+        .all(|d| !d.message.contains("circular")),
+        "B requires A inside a function"
+    );
+}
+
+/// The eager cycle fails at runtime the way Roblox does: `LUAU_BIN=… cargo test eager_cycle`.
+#[test]
+fn eager_cycle_fails_under_luau() {
+    let Ok(luau) = std::env::var("LUAU_BIN") else {
+        return;
+    };
+    let b = build("cycles", "ReplicatedStorage/Eager/A.luau", Minify::None);
+    let dir = std::env::temp_dir().join(format!("klsm-cycle-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("cycle.luau");
+    std::fs::write(&file, format!("game = {{}}\n{}", b.code)).unwrap();
+    let out = std::process::Command::new(&luau)
+        .arg(&file)
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains("Requested module was required recursively: ReplicatedStorage.Eager.A"),
+        "{stderr}"
+    );
+}

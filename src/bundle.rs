@@ -105,6 +105,9 @@ struct Unit {
     /// Module id; the entry script has none unless it is itself a ModuleScript.
     id: Option<usize>,
     deps: Vec<NodeId>,
+    /// Requires that run while this module loads, with their line: the only edges that
+    /// can make Roblox fail with "required recursively".
+    eager: Vec<(NodeId, usize)>,
 }
 
 pub struct Options<'a> {
@@ -258,6 +261,7 @@ pub fn bundle(opts: &Options) -> Bundle {
             analysis: Analysis::default(),
             id,
             deps: vec![],
+            eager: vec![],
         };
         match fs::read_to_string(tree.abs_file(&file)) {
             Ok(s) => unit.source = s.replace("\r\n", "\n"),
@@ -341,6 +345,9 @@ pub fn bundle(opts: &Options) -> Bundle {
                         order.len() - 1
                     });
                     unit.deps.push(*target);
+                    if !site.lazy {
+                        unit.eager.push((*target, site.line));
+                    }
                 }
             }
         }
@@ -461,8 +468,9 @@ fn warning(file: &str, line: usize, message: String) -> Diagnostic {
     }
 }
 
-/// Static cycles are legal when at least one require is lazy (inside a function),
-/// so they are warnings; the runtime raises Roblox's own error if one actually loops.
+/// A cycle with a lazy require (inside a function) is fine in Roblox: by the time that
+/// function runs, the module has finished loading. Only cycles made of requires that run at
+/// load time fail ("required recursively"), so only those are reported.
 fn report_cycles(
     units: &[Unit],
     tree: &Tree,
@@ -485,7 +493,11 @@ fn report_cycles(
     ) {
         state.insert(id, 1);
         stack.push(id);
-        for dep in by_id[&id].deps.iter().filter_map(|n| id_of.get(n).copied()) {
+        for dep in by_id[&id]
+            .eager
+            .iter()
+            .filter_map(|(n, _)| id_of.get(n).copied())
+        {
             match state.get(&dep) {
                 Some(1) => {
                     let start = stack.iter().position(|&s| s == dep).unwrap();
@@ -509,23 +521,39 @@ fn report_cycles(
         }
     }
     for cycle in found {
-        let names: Vec<String> = cycle
-            .iter()
-            .map(|id| tree.node(by_id[id].node).name.clone())
+        // `A (A.luau:12) -> B (B.luau:5) -> A`: each step names the line of its require.
+        let steps: Vec<(&Unit, usize)> = cycle
+            .windows(2)
+            .map(|pair| {
+                let (from, to) = (by_id[&pair[0]], by_id[&pair[1]]);
+                let line = from
+                    .eager
+                    .iter()
+                    .find(|(n, _)| *n == to.node)
+                    .map_or(0, |e| e.1);
+                (from, line)
+            })
             .collect();
+        let path: Vec<String> = steps
+            .iter()
+            .map(|(unit, line)| {
+                let file = unit.file.rsplit('/').next().unwrap_or(&unit.file);
+                format!("{} ({file}:{line})", tree.node(unit.node).name)
+            })
+            .collect();
+        let (first, line) = steps[0];
         diags.push(warning(
-            &by_id[&cycle[0]].file,
-            0,
+            &first.file,
+            line,
             format!(
-                "circular require {}; fine only if one of these requires runs lazily",
-                names.join(" -> ")
+                "circular eager require {} -> {}; Roblox fails this with \"required recursively\"",
+                path.join(" -> "),
+                tree.node(first.node).name
             ),
         ));
     }
 }
 
-/// Rewrites resolved requires and strips `export` from type declarations, keeping
-/// the line count of every replaced span so the source map stays exact.
 fn rewrite(unit: &Unit, tree: &Tree, id_of: &HashMap<NodeId, usize>, opts: &Options) -> String {
     let annotate = opts.minify == Minify::None;
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();

@@ -27,6 +27,18 @@ code { font-family: var(--us-font-mono); font-size: .9em; color: var(--us-text);
 .place h6, .place .muted { padding: 0 8px; margin: 0; }
 .place .muted { font-size: 12px; }
 .place .input { font-family: var(--us-font-mono); }
+.assets { display: flex; flex-direction: column; gap: 8px; }
+.assets h6 { padding: 0 8px; margin: 0; }
+.assets__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow: auto; }
+.assets__list li { display: flex; align-items: center; gap: 4px; padding-left: 8px; border-radius: var(--us-r-md); }
+.assets__list li:hover { background: var(--us-wash); }
+.assets__list span { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 4px 0; }
+.assets__list strong, .assets__list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--us-font-mono); }
+.assets__list strong { font-size: 12px; font-weight: 500; color: var(--us-text); }
+.assets__list small { font-size: 10px; color: var(--us-text-subtle); }
+.assets__list .icon-btn { width: 28px; height: 28px; flex: none; }
+.assets__list .icon-btn svg { width: 14px; height: 14px; }
+.assets__list .empty-row { padding: 0 8px; }
 
 .main { overflow: auto; padding: 28px 32px 32px; display: flex; flex-direction: column; gap: 24px; }
 .empty { margin: auto; max-width: 420px; }
