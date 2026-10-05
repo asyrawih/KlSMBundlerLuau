@@ -1,0 +1,46 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            bundles: app,dmg
+            cli: target/release/klsm
+            app: app/target/release/bundle/dmg/*.dmg
+          - os: windows-latest
+            bundles: nsis
+            cli: target/release/klsm.exe
+            app: app/target/release/bundle/nsis/*.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            app -> target
+
+      - run: cargo test --release
+      - run: cargo build --release
+
+      - name: Desktop app
+        working-directory: app
+        run: npx --yes @tauri-apps/cli@^2 build --bundles ${{ matrix.bundles }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: klsm-${{ runner.os }}
+          path: |
+            ${{ matrix.cli }}
+            ${{ matrix.app }}

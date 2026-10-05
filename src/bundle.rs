@@ -585,6 +585,7 @@ fn emit(
     let entry = &units[0];
     let mut out = String::new();
     let mut segments = Vec::new();
+    let mut lines = LineCount::default();
     // `none` keeps the file readable; `light`/`full` drop every comment and space the
     // bundler adds itself, and `full` also drops the newlines between the module wrappers
     // (one newline per module stays, so `klsm trace` can still name the module).
@@ -678,7 +679,7 @@ fn emit(
             &format!("__KLSM_modules[{id}]{eq}function(...){proxy}{comment}"),
         );
         out.push_str(nl);
-        push_body(&mut out, &mut segments, unit, tree, &body, exact);
+        push_body(&mut out, &mut segments, &mut lines, unit, tree, &body, exact);
         glue(&mut out, "end\n");
     }
 
@@ -692,30 +693,50 @@ fn emit(
             glue(&mut out, "do");
             out.push_str(nl);
         }
-        push_body(&mut out, &mut segments, entry, tree, &body, exact);
+        push_body(&mut out, &mut segments, &mut lines, entry, tree, &body, exact);
         glue(&mut out, "end\n");
     }
     (out, segments)
 }
 
+/// Newlines in `out` so far, counted only over what was appended since the last call
+/// (recounting the whole bundle per module is quadratic).
+#[derive(Default)]
+struct LineCount {
+    scanned: usize,
+    lines: usize,
+}
+
+impl LineCount {
+    fn of(&mut self, out: &str) -> usize {
+        self.lines += out.as_bytes()[self.scanned..]
+            .iter()
+            .filter(|&&b| b == b'\n')
+            .count();
+        self.scanned = out.len();
+        self.lines
+    }
+}
+
 fn push_body(
     out: &mut String,
     segments: &mut Vec<Segment>,
+    lines: &mut LineCount,
     unit: &Unit,
     tree: &Tree,
     body: &str,
     exact: bool,
 ) {
-    let out_start = out.matches('\n').count() + 1;
+    let out_start = lines.of(out) + 1;
     let out_end = if exact {
         out.push_str(body);
         if !body.ends_with('\n') {
             out.push('\n');
         }
-        out.matches('\n').count()
+        lines.of(out)
     } else {
         glue(out, body.trim_end_matches('\n'));
-        out.matches('\n').count() + 1
+        lines.of(out) + 1
     };
     segments.push(Segment {
         file: unit.file.clone(),
