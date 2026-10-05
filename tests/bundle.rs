@@ -609,6 +609,8 @@ fn client_profiles_exclude_features_and_redirect_output() {
         external: vec!["ReplicatedStorage".into()],
         internal: vec!["ReplicatedStorage.AddonLoader".into()],
         features: Some("*/Addon/Features".into()),
+        assets: None,
+        place: None,
         bundles: vec![BundleTarget {
             entry: "ServerScriptService/Server/Main.server.luau".into(),
             output: "/somewhere/Loader.server.luau".into(),
@@ -722,6 +724,8 @@ fn package_ships_enabled_shared_features_only() {
         external: vec!["ReplicatedStorage".into()],
         internal: vec!["ReplicatedStorage.AddonLoader".into()],
         features: Some("*/Addon/Features".into()),
+        assets: None,
+        place: None,
         bundles: vec![BundleTarget {
             entry: "ServerScriptService/Server/Main.server.luau".into(),
             output: "Loader.server.luau".into(),
@@ -740,8 +744,49 @@ fn package_ships_enabled_shared_features_only() {
     };
     profile::apply(&mut config, &config_path, "solo", &solo).unwrap();
     assert!(klsm_bundler::build_all(&config, false, &mut |_| {}).unwrap());
+
+    // A Studio "Save to File" of ReplicatedStorage.EffectDonation (binary, like Studio's default).
+    let assets = dir.join("assets");
+    std::fs::create_dir_all(assets.join("ReplicatedStorage")).unwrap();
+    let effect = rbx_dom_weak::WeakDom::new(
+        rbx_dom_weak::InstanceBuilder::new("DataModel").with_child(
+            rbx_dom_weak::InstanceBuilder::new("Folder")
+                .with_name("EffectDonation")
+                .with_child(
+                    rbx_dom_weak::InstanceBuilder::new("Part")
+                        .with_name("Burst")
+                        .with_child(
+                            rbx_dom_weak::InstanceBuilder::new("ParticleEmitter")
+                                .with_name("Spark"),
+                        ),
+                ),
+        ),
+    );
+    let file = std::fs::File::create(assets.join("ReplicatedStorage/EffectDonation.rbxm")).unwrap();
+    rbx_binary::to_writer(file, &effect, effect.root().children()).unwrap();
+    config.assets = Some(assets.clone());
+
     let package = profile::write_package(&config, &config_path, "solo").unwrap();
-    let xml = std::fs::read_to_string(package).unwrap();
+    let xml = std::fs::read_to_string(&package).unwrap();
+    // The asset sits in the package's one ReplicatedStorage folder, next to the shared modules.
+    let dom = rbx_xml::from_str_default(&xml).unwrap();
+    let path_of = |name: &str| {
+        let inst = dom.descendants().find(|i| i.name == name).unwrap();
+        dom.full_path_of(inst.referent(), ".")
+    };
+    assert_eq!(
+        path_of("Spark"),
+        "KlsmPackage.ReplicatedStorage.EffectDonation.Burst.Spark"
+    );
+    assert_eq!(xml.matches(">ReplicatedStorage<").count(), 1);
+
+    // Files must sit in a service folder, or the installer would leave them in the package.
+    std::fs::write(
+        assets.join("Loose.rbxmx"),
+        "<roblox version=\"4\"></roblox>",
+    )
+    .unwrap();
+    assert!(profile::write_package(&config, &config_path, "solo").is_err());
     assert!(xml.contains("AlphaConfig"));
     assert!(
         !xml.contains("BetaConfig"),
@@ -783,4 +828,39 @@ fn installer_runs_under_luau() {
         String::from_utf8_lossy(&out.stdout),
         "Addon,AddonLoader,EffectDonation,Loader\tAlpha\tAlphaConfig,Assets\tnew\tnew\tclient\tLoader\n"
     );
+}
+
+#[test]
+fn place_assets_land_under_their_service_folder() {
+    use rbx_dom_weak::{InstanceBuilder, WeakDom};
+    let mut place = WeakDom::new(
+        InstanceBuilder::new("DataModel").with_child(
+            InstanceBuilder::new("ReplicatedStorage")
+                .with_name("ReplicatedStorage")
+                .with_child(
+                    InstanceBuilder::new("Folder")
+                        .with_name("EffectDonation")
+                        .with_child(InstanceBuilder::new("Sound").with_name("Ding")),
+                ),
+        ),
+    );
+    let mut package = WeakDom::new(
+        InstanceBuilder::new("DataModel")
+            .with_child(InstanceBuilder::new("Folder").with_name("KlsmPackage")),
+    );
+    let root = package.root().children()[0];
+    let paths = vec!["ReplicatedStorage.EffectDonation".to_string()];
+    klsm_bundler::place::copy_assets(&mut place, &paths, &mut package, root).unwrap();
+    let ding = package.descendants().find(|i| i.name == "Ding").unwrap();
+    assert_eq!(
+        package.full_path_of(ding.referent(), "."),
+        "KlsmPackage.ReplicatedStorage.EffectDonation.Ding"
+    );
+
+    let missing = vec!["ReplicatedStorage.Nope".to_string()];
+    let err =
+        klsm_bundler::place::copy_assets(&mut place, &missing, &mut package, root).unwrap_err();
+    assert!(err.to_string().contains("\"Nope\""), "{err}");
+    let bare = vec!["EffectDonation".to_string()];
+    assert!(klsm_bundler::place::copy_assets(&mut place, &bare, &mut package, root).is_err());
 }

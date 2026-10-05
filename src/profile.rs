@@ -3,7 +3,7 @@
 //! writes the outputs to `dist/<name>/` instead of the configured paths.
 
 use crate::config::Config;
-use crate::output::{Item, script_item, write_model};
+use crate::output::{Item, add_assets, model, script_item, write_dom};
 use crate::tree::{NodeId, ROOT, RunContext, Tree};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -337,6 +337,17 @@ pub fn write_package(config: &Config, config_path: &Path, name: &str) -> Result<
         }
     }
     let path = dist.join(format!("{name}.rbxmx"));
-    write_model(&[package], &path)?;
+    let mut dom = model(&[package]);
+    if let Some(dir) = &config.assets {
+        let package = dom.root().children()[0];
+        add_assets(&mut dom, package, dir)?;
+    }
+    if let Some(place) = config.place.as_ref().filter(|p| !p.assets.is_empty()) {
+        let package = dom.root().children()[0];
+        let key = crate::place::api_key(config_path.parent().unwrap_or(Path::new(".")))?;
+        let mut source = crate::place::download(place.id, &key)?;
+        crate::place::copy_assets(&mut source, &place.assets, &mut dom, package)?;
+    }
+    write_dom(&dom, &path)?;
     Ok(path)
 }

@@ -3,6 +3,7 @@ pub mod bundle;
 pub mod config;
 pub mod minify;
 pub mod output;
+pub mod place;
 pub mod profile;
 pub mod trace;
 pub mod tree;

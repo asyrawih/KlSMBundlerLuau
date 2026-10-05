@@ -2,7 +2,9 @@
 
 use crate::bundle::Bundle;
 use crate::tree::{Node, RunContext};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
+use rbx_dom_weak::{InstanceBuilder, WeakDom};
+use rbx_types::{Attributes, Enum, Ref};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -31,13 +33,6 @@ pub fn write_bundle(bundle: &Bundle, output: &Path) -> Result<()> {
     )
 }
 
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-
 /// One instance in a Roblox XML model.
 pub struct Item {
     pub class: String,
@@ -64,80 +59,115 @@ impl Item {
     }
 }
 
-/// Roblox's AttributesSerialize blob: count, then (name, type 0x03 bool, value) per entry.
-fn bool_attributes(names: &[String]) -> String {
-    let mut bytes = (names.len() as u32).to_le_bytes().to_vec();
-    for name in names {
-        bytes.extend((name.len() as u32).to_le_bytes());
-        bytes.extend(name.as_bytes());
-        bytes.extend([0x03, 0x01]);
+/// Converts `item` and its children into `dom` under `parent`; returns the new instance.
+fn insert_item(dom: &mut WeakDom, parent: Ref, item: &Item) -> Ref {
+    let mut builder = InstanceBuilder::new(item.class.as_str()).with_name(&item.name);
+    if let Some(source) = &item.source {
+        builder = builder.with_property("Source", source.clone());
     }
-    base64(&bytes)
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::new();
-    for chunk in bytes.chunks(3) {
-        let n = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |n, (i, &b)| n | (b as u32) << (16 - 8 * i));
-        for i in 0..4 {
-            out.push(if i <= chunk.len() {
-                ABC[(n >> (18 - 6 * i) & 63) as usize] as char
-            } else {
-                '='
-            });
-        }
-    }
-    out
-}
-
-fn push_item(out: &mut String, item: &Item, next_ref: &mut usize, depth: usize) {
-    let pad = "  ".repeat(depth);
-    out.push_str(&format!(
-        "{pad}<Item class=\"{}\" referent=\"RBXKLSM{}\">\n{pad}  <Properties>\n{pad}    <string name=\"Name\">{}</string>\n",
-        xml_escape(&item.class),
-        next_ref,
-        xml_escape(&item.name)
-    ));
-    *next_ref += 1;
     if let Some(rc) = item.run_context {
-        out.push_str(&format!(
-            "{pad}    <token name=\"RunContext\">{rc}</token>\n"
-        ));
+        builder = builder.with_property("RunContext", Enum::from_u32(rc as u32));
     }
     if !item.flags.is_empty() {
-        out.push_str(&format!(
-            "{pad}    <BinaryString name=\"AttributesSerialize\">{}</BinaryString>\n",
-            bool_attributes(&item.flags)
-        ));
+        let attributes = item
+            .flags
+            .iter()
+            .fold(Attributes::new(), |a, flag| a.with(flag.as_str(), true));
+        builder = builder.with_property("Attributes", attributes);
     }
-    if let Some(source) = &item.source {
-        out.push_str(&format!(
-            "{pad}    <ProtectedString name=\"Source\"><![CDATA[{}]]></ProtectedString>\n",
-            source.replace("]]>", "]]]]><![CDATA[>")
-        ));
-    }
-    out.push_str(&format!("{pad}  </Properties>\n"));
+    let id = dom.insert(parent, builder);
     for child in &item.children {
-        push_item(out, child, next_ref, depth + 1);
+        insert_item(dom, id, child);
     }
-    out.push_str(&format!("{pad}</Item>\n"));
+    id
 }
 
-/// A Roblox XML model holding `roots`: drag into Studio or insert with a plugin.
-pub fn write_model(roots: &[Item], path: &Path) -> Result<()> {
-    let mut xml = String::from(
-        "<roblox xmlns:xmime=\"http://www.w3.org/2005/05/xmlmime\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"http://www.roblox.com/roblox.xsd\" version=\"4\">\n",
-    );
-    let mut next_ref = 0;
-    for root in roots {
-        push_item(&mut xml, root, &mut next_ref, 1);
+/// A model holding `roots`, ready for `add_assets` and `write_dom`.
+pub fn model(roots: &[Item]) -> WeakDom {
+    let mut dom = WeakDom::new(InstanceBuilder::new("DataModel"));
+    let root = dom.root_ref();
+    for item in roots {
+        insert_item(&mut dom, root, item);
     }
-    xml.push_str("</roblox>\n");
-    write(path, &xml)
+    dom
+}
+
+/// The child of `parent` named `name`, created as a Folder when missing.
+pub fn folder(dom: &mut WeakDom, parent: Ref, name: &str) -> Ref {
+    let existing = dom
+        .get_by_ref(parent)
+        .unwrap()
+        .children()
+        .iter()
+        .copied()
+        .find(|&c| {
+            let child = dom.get_by_ref(c).unwrap();
+            child.name == name && child.class == "Folder"
+        });
+    existing.unwrap_or_else(|| dom.insert(parent, InstanceBuilder::new("Folder").with_name(name)))
+}
+
+/// Adds every `.rbxm` / `.rbxmx` under `dir` to `dom` below `parent`, at the folder path the
+/// file sits in: `assets/ReplicatedStorage/EffectDonation.rbxm` (a Studio "Save to File" of
+/// `ReplicatedStorage.EffectDonation`) lands in `<parent>/ReplicatedStorage/`.
+pub fn add_assets(dom: &mut WeakDom, parent: Ref, dir: &Path) -> Result<usize> {
+    let mut files = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for entry in fs::read_dir(&d).with_context(|| format!("reading {}", d.display()))? {
+            let path = entry?.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path
+                .extension()
+                .is_some_and(|e| e == "rbxm" || e == "rbxmx")
+            {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    for file in &files {
+        let reader = std::io::BufReader::new(fs::File::open(file)?);
+        let mut asset = if file.extension().is_some_and(|e| e == "rbxm") {
+            rbx_binary::from_reader(reader).map_err(anyhow::Error::from)
+        } else {
+            rbx_xml::from_reader_default(reader).map_err(anyhow::Error::from)
+        }
+        .with_context(|| format!("reading {}", file.display()))?;
+        let mut into = parent;
+        let rel = file
+            .parent()
+            .unwrap()
+            .strip_prefix(dir)
+            .unwrap_or(Path::new(""));
+        if rel.as_os_str().is_empty() {
+            bail!(
+                "{}: put assets in a folder named after their service (e.g. {}/ReplicatedStorage/)",
+                file.display(),
+                dir.display()
+            );
+        }
+        for segment in rel.iter() {
+            into = folder(dom, into, &segment.to_string_lossy());
+        }
+        for child in asset.root().children().to_vec() {
+            asset.transfer(child, dom, into);
+        }
+    }
+    Ok(files.len())
+}
+
+/// Writes `dom`'s top-level instances as a Roblox XML model (drag into Studio).
+pub fn write_dom(dom: &WeakDom, path: &Path) -> Result<()> {
+    let mut xml = Vec::new();
+    rbx_xml::to_writer_default(&mut xml, dom, dom.root().children())?;
+    write(path, &String::from_utf8(xml)?)
+}
+
+/// A Roblox XML model holding `roots`.
+pub fn write_model(roots: &[Item], path: &Path) -> Result<()> {
+    write_dom(&model(roots), path)
 }
 
 /// The script Roblox needs to run a bundle whose entry was `entry`.

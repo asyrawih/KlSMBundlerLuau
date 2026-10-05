@@ -117,6 +117,9 @@ impl BuildArgs {
                 "✓ package → {} (drop it into ServerScriptService)",
                 package.display()
             );
+            if let Some(line) = config.place.as_ref().and_then(|p| p.summary()) {
+                eprintln!("{line}");
+            }
         }
         Ok(ok)
     }
@@ -131,6 +134,8 @@ impl BuildArgs {
                 external: self.external.clone(),
                 internal: self.internal.clone(),
                 features: None,
+                assets: None,
+                place: None,
                 bundles: vec![Target {
                     entry: entry.clone(),
                     output: output.clone(),

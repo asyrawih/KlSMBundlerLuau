@@ -1,6 +1,6 @@
 [package]
 name = "klsm-app"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2024"
 
 [build-dependencies]
@@ -11,3 +11,4 @@ anyhow = "1"
 klsm-bundler = { path = ".." }
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = [] }
+toml_edit = "0.25.15"

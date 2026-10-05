@@ -9,6 +9,12 @@ internal = ["ReplicatedStorage.AddonLoader"]
 # features off by folder name. `*` = the side (Server / Client / Shared).
 features = "Addon/*/Features"
 
+# Studio-only content copied from the place's last saved version into client packages.
+# Needs an Open Cloud API key: ROBLOX_API_KEY, or a .roblox-api-key file next to this one.
+[place]
+id = 82391043752226
+assets = ["ReplicatedStorage.EffectDonation", "ReplicatedStorage.Asset"]
+
 [[bundle]]
 entry  = "ServerScriptService/Server/Main.server.luau"
 output = "/Users/dxh4nan/Documents/RessoMusic/ServerScriptService/Loader.server.luau"

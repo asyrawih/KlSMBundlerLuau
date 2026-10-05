@@ -125,7 +125,28 @@ When the server starts, the installer merges each service-named folder into that
 scripts and modules replace same-named ones, folders merge (Studio-only content in them stays), and
 a feature folder (`features` under `external`, marked `KlsmExact`) also loses features the package
 doesn't have, so nothing has to be deleted from the client's place by hand. Replace the old package
-when updating. A module that's excluded but still required statically by something bundled is
+when updating.
+
+Studio-only content the code depends on (effects, models, sounds: anything Script Sync doesn't
+sync) can ship in the package too, read from the place's last saved version through Open Cloud:
+
+```toml
+[place]
+id = 82391043752226
+assets = ["ReplicatedStorage.EffectDonation", "ReplicatedStorage.Asset"]
+```
+
+The Open Cloud API key comes from `ROBLOX_API_KEY`, or a `.roblox-api-key` file next to
+`bundle.toml` (gitignored; the desktop app doesn't see shell variables). Save the place in Studio
+before building, or the package gets the previous version. Without a key (or offline), export by hand instead: in Studio, right-click the instance → *Save to File* and save
+the `.rbxm` (or `.rbxmx`) into a folder laid out by service, then point `assets` at it:
+
+```toml
+assets = "assets"     # assets/ReplicatedStorage/EffectDonation.rbxm → ReplicatedStorage.EffectDonation
+```
+
+Each file's contents land under the folders its path names, so the installer merges them into
+the place like everything else. Re-export after changing them in Studio. A module that's excluded but still required statically by something bundled is
 bundled anyway, with a warning naming who requires it.
 
 ### Desktop app

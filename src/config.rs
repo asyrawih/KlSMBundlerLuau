@@ -29,6 +29,11 @@ pub struct Config {
     /// Folders holding one folder per feature, from `root` (`Addon/*/Features`); the
     /// wildcard parts name the sides. Used by client profiles (`clients/<name>.toml`).
     pub features: Option<String>,
+    /// Folder of `.rbxm` / `.rbxmx` files exported from Studio, laid out by service
+    /// (`assets/ReplicatedStorage/EffectDonation.rbxm`); client packages ship them.
+    pub assets: Option<PathBuf>,
+    /// Studio-only content read from the published place (`[place]`); client packages ship it.
+    pub place: Option<crate::place::Place>,
     #[serde(rename = "bundle", default)]
     pub bundles: Vec<Target>,
 }
@@ -111,6 +116,7 @@ impl Config {
         let base = path.parent().unwrap_or(Path::new("."));
         config.root = base.join(&config.root);
         config.sourcemap = config.sourcemap.map(|s| config.root.join(s));
+        config.assets = config.assets.map(|a| base.join(a));
         for target in &mut config.bundles {
             target.output = base.join(&target.output);
             target.rbxmx = target.rbxmx.take().map(|p| base.join(p));

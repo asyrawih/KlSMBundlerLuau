@@ -44,6 +44,7 @@ async function openProject(path) {
   project = await call("open_project", { config });
   store.set("config", config);
   renderClients();
+  renderPlace();
   const remembered = store.get(`client:${config}`);
   const first = project.clients.includes(remembered) ? remembered : project.clients[0];
   if (first) {
@@ -51,6 +52,18 @@ async function openProject(path) {
   } else {
     showEmpty("Add your first client", "Name it on the left. Every feature starts enabled; switch off what they don't get.");
   }
+}
+
+// The key itself never comes back from Rust; only whether one is set.
+function renderPlace() {
+  $("placeForm").hidden = false;
+  $("placeId").value = project.place_id ?? "";
+  $("apiKey").placeholder = project.has_api_key ? "API key saved (paste to replace)" : "Open Cloud API key";
+  $("placeStatus").textContent = !project.place_id
+    ? "Set a place to ship its Studio assets."
+    : project.has_api_key
+      ? "Client builds download this place's assets."
+      : "Add an API key to download the place.";
 }
 
 function renderClients() {
@@ -216,6 +229,24 @@ $("allOn").onclick = async () => {
   disabled.clear();
   renderFeatures();
   await save();
+};
+
+$("placeForm").onsubmit = async (e) => {
+  e.preventDefault();
+  if (!project) return;
+  const id = $("placeId").value.trim();
+  const key = $("apiKey").value.trim();
+  if (id && Number(id) !== project.place_id) {
+    await call("save_place", { config, id: Number(id) });
+    project.place_id = Number(id);
+  }
+  if (key) {
+    await call("save_api_key", { config, key });
+    $("apiKey").value = "";
+    project.has_api_key = true;
+  }
+  renderPlace();
+  toast("Saved.", "ok");
 };
 
 $("buildBtn").onclick = build;

@@ -23,6 +23,10 @@ code { font-family: var(--us-font-mono); font-size: .9em; color: var(--us-text);
 .clients button[aria-current="true"]::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--us-primary); box-shadow: 0 0 8px var(--us-primary); }
 .new-client { display: flex; gap: 6px; }
 .new-client .input { flex: 1; min-width: 0; font-family: var(--us-font-mono); }
+.place { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--us-hair); }
+.place h6, .place .muted { padding: 0 8px; margin: 0; }
+.place .muted { font-size: 12px; }
+.place .input { font-family: var(--us-font-mono); }
 
 .main { overflow: auto; padding: 28px 32px 32px; display: flex; flex-direction: column; gap: 24px; }
 .empty { margin: auto; max-width: 420px; }

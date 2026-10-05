@@ -34,6 +34,13 @@
       <input class="input input--sm" id="newName" placeholder="new-client" pattern="[A-Za-z0-9_\-]+" title="Letters, digits, - and _" autocomplete="off" aria-label="New client name">
       <button class="icon-btn icon-btn--sm" type="submit" aria-label="Add client"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
     </form>
+    <form class="place" id="placeForm" hidden>
+      <h6>Roblox place</h6>
+      <p class="muted" id="placeStatus"></p>
+      <input class="input input--sm" id="placeId" inputmode="numeric" pattern="[0-9]+" title="Digits only" placeholder="Place ID" autocomplete="off" aria-label="Roblox place ID">
+      <input class="input input--sm" id="apiKey" type="password" placeholder="Open Cloud API key" autocomplete="off" spellcheck="false" aria-label="Roblox Open Cloud API key">
+      <button class="btn btn--secondary btn--sm" type="submit">Save</button>
+    </form>
   </aside>
 
   <main class="main" id="main">
