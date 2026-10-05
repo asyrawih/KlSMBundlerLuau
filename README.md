@@ -20,7 +20,7 @@ cargo install --path .          # installs `klsm`
 
 ```toml
 root = "../RessoMusic"          # the Script Sync folder (maps to `game`)
-minify = "none"                 # none | light | full
+minify = "none"                 # none | light | full | max
 regenerate_sourcemap = true     # rewrite sourcemap.json whenever it lags behind the folder
 external = ["ReplicatedStorage"] # modules here stay in the game instead of being bundled
 
@@ -166,6 +166,9 @@ cd app && cargo tauri build    # KlSM Bundler.app + .dmg in app/target/release/b
 - `full` also joins lines: after the `--!` directives each module is a single line (that one
   newline per module is what lets traces still name the module). Only `none` keeps the
   `-- Bundled by …` header and the per-module file comments.
+- `max` is `full` plus renaming every local to a short name (darklua's `rename_variables`), about
+  20% smaller again. Lines stay where `full` put them, so traces still name the module, but
+  local names in Roblox error messages become `a`, `b`, ….
 
 Every build writes `<output>.map.json`. `klsm trace <map> 352` prints the original file and line;
 without line numbers it rewrites a pasted Roblox log (`Server:352: …` and
@@ -181,5 +184,4 @@ KLSM_REAL_PROJECT=../RessoMusic cargo test --release real_project  # lossless-mi
 
 ## Not done yet
 
-- Renaming locals when minifying (only whitespace/comments are removed).
 - Per-target filtering (e.g. refusing server-only modules in a client bundle).

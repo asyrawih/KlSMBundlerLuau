@@ -2,6 +2,7 @@
 //!
 //! `Light` keeps every newline so line numbers (and the source map) stay exact;
 //! `Full` also drops newlines, so traces only resolve to the module.
+//! `Max` is `Full` plus darklua's local renaming over the finished bundle.
 
 use anyhow::{Result, anyhow};
 use full_moon::LuaVersion;
@@ -15,6 +16,7 @@ pub enum Minify {
     None,
     Light,
     Full,
+    Max,
 }
 
 fn is_word(c: char) -> bool {
@@ -123,4 +125,24 @@ pub fn minify(source: &str, level: Minify) -> Result<String> {
         out.pop();
     }
     Ok(out)
+}
+
+/// Renames every local to a short name (darklua `rename_variables`), keeping each token on
+/// its line so the source map stays valid. Globals and fields are left alone.
+pub fn rename_locals(code: &str) -> Result<String> {
+    use darklua_core::generator::{LuaGenerator, TokenBasedLuaGenerator};
+    use darklua_core::rules::{ContextBuilder, RenameVariables, Rule};
+
+    let mut block = darklua_core::Parser::default()
+        .preserve_tokens()
+        .parse(code)
+        .map_err(|e| anyhow!("rename: {e}"))?;
+    let resources = darklua_core::Resources::from_memory();
+    let context = ContextBuilder::new("bundle.luau", &resources, code).build();
+    RenameVariables::default()
+        .process(&mut block, &context)
+        .map_err(|e| anyhow!("rename: {e}"))?;
+    let mut generator = TokenBasedLuaGenerator::new(code);
+    generator.write_block(&block);
+    Ok(generator.into_string())
 }

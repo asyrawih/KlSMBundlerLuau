@@ -1,7 +1,7 @@
 //! Walks the require graph from an entry script and emits one self-contained file.
 
 use crate::analyze::{self, Aliases, Analysis, Target};
-use crate::minify::{Minify, glue, minify};
+use crate::minify::{Minify, glue, minify, rename_locals};
 use crate::tree::{NodeId, Tree, lua_string};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -415,7 +415,13 @@ pub fn bundle(opts: &Options) -> Bundle {
     }
     report_cycles(&units, tree, &id_of, &mut diags);
 
-    let (code, segments) = emit(&units, opts, &id_of, &mut diags);
+    let (mut code, segments) = emit(&units, opts, &id_of, &mut diags);
+    if opts.minify == Minify::Max {
+        match rename_locals(&code) {
+            Ok(renamed) => code = renamed,
+            Err(e) => diags.push(error(&entry_file, 0, e.to_string())),
+        }
+    }
     diags.sort_by(|a, b| {
         b.level
             .cmp(&a.level)
@@ -590,7 +596,7 @@ fn emit(
     // bundler adds itself, and `full` also drops the newlines between the module wrappers
     // (one newline per module stays, so `klsm trace` can still name the module).
     let annotate = opts.minify == Minify::None;
-    let full = opts.minify == Minify::Full;
+    let full = matches!(opts.minify, Minify::Full | Minify::Max);
     let exact = !full;
     let (eq, nl) = if annotate {
         (" = ", "\n")
@@ -679,7 +685,15 @@ fn emit(
             &format!("__KLSM_modules[{id}]{eq}function(...){proxy}{comment}"),
         );
         out.push_str(nl);
-        push_body(&mut out, &mut segments, &mut lines, unit, tree, &body, exact);
+        push_body(
+            &mut out,
+            &mut segments,
+            &mut lines,
+            unit,
+            tree,
+            &body,
+            exact,
+        );
         glue(&mut out, "end\n");
     }
 
@@ -693,7 +707,15 @@ fn emit(
             glue(&mut out, "do");
             out.push_str(nl);
         }
-        push_body(&mut out, &mut segments, &mut lines, entry, tree, &body, exact);
+        push_body(
+            &mut out,
+            &mut segments,
+            &mut lines,
+            entry,
+            tree,
+            &body,
+            exact,
+        );
         glue(&mut out, "end\n");
     }
     (out, segments)

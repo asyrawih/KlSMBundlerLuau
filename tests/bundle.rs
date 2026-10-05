@@ -194,6 +194,7 @@ fn real_project() {
     for entry in [
         "ServerScriptService/Server/Main.server.luau",
         "StarterPlayerScripts/Client/Main.local.luau",
+        "StarterPlayerScripts/Client/Main.client.luau",
         "ServerScriptService/Server.server.luau",
         "StarterPlayerScripts/Client.local.luau",
     ] {
@@ -231,6 +232,14 @@ fn real_project() {
                 min.code.len() / 1024
             );
         }
+        // Renaming changes tokens, so only check it parses and keeps Full's lines.
+        let max = make(Minify::Max);
+        assert!(!max.has_errors(), "{}", diagnostics(&max));
+        assert!(parses(&max.code));
+        assert_eq!(
+            max.code.lines().count(),
+            make(Minify::Full).code.lines().count()
+        );
     }
 }
 
@@ -240,7 +249,7 @@ fn runs_under_luau() {
     let Ok(luau) = std::env::var("LUAU_BIN") else {
         return;
     };
-    for level in [Minify::None, Minify::Light, Minify::Full] {
+    for level in [Minify::None, Minify::Light, Minify::Full, Minify::Max] {
         let b = build("basic", "ReplicatedStorage/Shared/Suite.luau", level);
         let script = format!(
             "game = {{ GetService = function() return {{ WaitForChild = function() return {{}} end }} end }}\n\
@@ -531,7 +540,7 @@ fn addon_loader_runs_under_luau() {
         "ServerScriptService/Addon/Features/*/*Service.luau".to_string(),
         "ServerScriptService/Addon/Features/*/*Boot.luau".to_string(),
     ];
-    for level in [Minify::None, Minify::Light, Minify::Full] {
+    for level in [Minify::None, Minify::Light, Minify::Full, Minify::Max] {
         let b = build_addons(&include, level);
         assert!(!b.has_errors(), "{}", diagnostics(&b));
         let script = format!(
