@@ -1,0 +1,2 @@
+# runtime.luau / installer.luau are embedded with include_str! and must stay LF on Windows.
+* text=auto eol=lf
