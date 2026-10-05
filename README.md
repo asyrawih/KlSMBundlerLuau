@@ -21,7 +21,7 @@ cargo install --path .          # installs `klsm`
 ```toml
 root = "../RessoMusic"          # the Script Sync folder (maps to `game`)
 minify = "none"                 # none | light | full | max
-regenerate_sourcemap = true     # rewrite sourcemap.json whenever it lags behind the folder
+regenerate_sourcemap = true     # default: rewrite sourcemap.json whenever it lags behind the folder
 external = ["ReplicatedStorage"] # modules here stay in the game instead of being bundled
 
 [[bundle]]
@@ -58,9 +58,11 @@ and StarterCharacterScripts are placed under StarterPlayer as in the real DataMo
 `klsm tree --root <folder>` prints what it sees.
 
 Studio only rewrites `sourcemap.json` when it feels like it, so it lags behind after moving or
-adding scripts. `klsm sourcemap` (or `regenerate_sourcemap = true` / `--regenerate-sourcemap` on
-`build` and `watch`) writes the merged view back in Studio's format: scripts found on disk are
-added and entries whose file is gone are dropped, so tools like Luau LSP see the same tree.
+adding scripts. So every `build` and `watch` with a config writes the merged view back in Studio's
+format whenever it's stale: scripts found on disk are added and entries whose file is gone are
+dropped, so tools like Luau LSP see the same tree. `regenerate_sourcemap = false` turns that off;
+`klsm sourcemap` does it on demand, and `--regenerate-sourcemap` does it for a single `--entry`
+build.
 
 ## External modules
 

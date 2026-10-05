@@ -72,7 +72,7 @@ pub fn build_all(config: &Config, strict: bool, log: &mut dyn FnMut(&str)) -> Re
             ));
         } else if !tree.stale_files.is_empty() {
             log(&format!(
-                "note: sourcemap.json is missing {} script(s) found on disk (e.g. {}); using the folder layout for them (`klsm sourcemap` or `regenerate_sourcemap = true` fixes this)",
+                "note: sourcemap.json is missing {} script(s) found on disk (e.g. {}); using the folder layout for them (`klsm sourcemap` fixes this, or drop `regenerate_sourcemap = false`)",
                 tree.stale_files.len(),
                 tree.stale_files[0]
             ));

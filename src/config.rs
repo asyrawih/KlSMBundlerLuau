@@ -13,8 +13,8 @@ pub struct Config {
     pub root: PathBuf,
     /// Defaults to `<root>/sourcemap.json`; the folder layout is used if it's missing.
     pub sourcemap: Option<PathBuf>,
-    /// Rewrite the sourcemap from the folder layout whenever it's out of date.
-    #[serde(default)]
+    /// Rewrite the sourcemap from the folder layout whenever it's out of date (on by default).
+    #[serde(default = "yes")]
     pub regenerate_sourcemap: bool,
     #[serde(default)]
     pub minify: Minify,
@@ -36,6 +36,10 @@ pub struct Config {
     pub place: Option<crate::place::Place>,
     #[serde(rename = "bundle", default)]
     pub bundles: Vec<Target>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
