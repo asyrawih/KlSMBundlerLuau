@@ -1,6 +1,6 @@
 # Sync folder = game. Paths below are relative to this file.
 root = "../RessoMusic"
-minify = "full"
+minify = "max"
 external = ["ReplicatedStorage"]
 # AddonLoader scans Addon/*/Features at runtime; a copy goes in each bundle so it can
 # require the bundled addons through the `script` stand-in.
@@ -12,8 +12,8 @@ features = "Addon/*/Features"
 # Studio-only content copied from the place's last saved version into client packages.
 # Needs an Open Cloud API key: ROBLOX_API_KEY, or a .roblox-api-key file next to this one.
 [place]
-id = 82391043752226
-assets = ["ReplicatedStorage.EffectDonation", "ReplicatedStorage.Asset"]
+id = 71499246754899
+assets = ["Workspace.MusicZone", "Workspace.Podcast", "Workspace.MimicPartyArea"]
 
 [[bundle]]
 entry  = "ServerScriptService/Server/Main.server.luau"
@@ -23,10 +23,6 @@ include = [
   "Addon/Server/Features/*/*Service.luau",
   "Addon/Server/Features/*/*Boot.luau",   # loaded by Main before the base services
 ]
-exclude = [
-  "Addon/Server/Features/MimicParty/*Service.luau",
-  "Addon/Server/Features/Affiliate/*Service.luau",
-]
 
 [[bundle]]
 entry  = "StarterPlayerScripts/Client/Main.client.luau"
@@ -35,8 +31,4 @@ rbxmx  = "dist/Client.rbxmx"
 include = [
   "Addon/Client/Features/*/*Controller.luau",
   "Addon/Client/Features/*/*Boot.luau",
-]
-exclude = [
-  "Addon/Client/Features/MimicParty/*Controller.luau",
-  "Addon/Client/Features/Affiliate/*Controller.luau",
 ]
