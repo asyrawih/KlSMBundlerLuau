@@ -986,6 +986,13 @@ local folder = script.Parent:FindFirstChild("Nope")
 local m = if folder then folder:FindFirstChild("X") else nil
 local a = if m then require(m) else nil
 local b = require(other)
+local function find()
+    local f = game:GetService("ReplicatedStorage"):FindFirstChild("Shared")
+    local c = f and f:FindFirstChild("Config")
+    if not c then return nil end
+    return require(c)
+end
+local d = require(script.Parent:FindFirstChild("Gone"))
 "#;
     let a = klsm_bundler::analyze::analyze(src, &tree, node, &Aliases::new()).unwrap();
     use klsm_bundler::analyze::Target;

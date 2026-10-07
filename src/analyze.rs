@@ -28,8 +28,9 @@ pub enum Target {
     Dynamic,
     /// `require(123456)` — a published asset; left untouched.
     Asset,
-    /// A soft link, `if folder then folder:FindFirstChild("X") else nil`: the module may
-    /// not exist, so it's left to the runtime (the stand-in returns nil for unbundled ones).
+    /// A soft link that may be nil (`folder and folder:FindFirstChild("X")`, `if f then
+    /// ... else nil`, or a `FindFirstChild` of something absent): the module may not
+    /// exist, so it's left to the runtime (the stand-in returns nil for unbundled ones).
     Optional,
 }
 
@@ -264,9 +265,25 @@ impl Analyzer<'_> {
                 if ie.else_if_expressions().is_none()
                     && matches!(unparen(ie.else_expression()), Expression::Symbol(t) if t.token().to_string() == "nil") =>
             {
-                Target::Optional
+                self.soft(ie.if_expression())
             }
+            // `folder and folder:FindFirstChild("X")`: X or nothing.
+            Expression::BinaryOperator {
+                binop: BinOp::And(_),
+                rhs,
+                ..
+            } => self.soft(rhs),
             _ => Target::Dynamic,
+        }
+    }
+
+    /// A value that may be nil (`if c then <expr> else nil`, `c and <expr>`): resolvable
+    /// shapes become `Optional`, the rest stays `Dynamic`.
+    fn soft(&self, expr: &Expression) -> Target {
+        match self.eval(expr) {
+            Target::Dynamic => Target::Dynamic,
+            Target::Asset => Target::Asset,
+            _ => Target::Optional,
         }
     }
 
@@ -305,10 +322,14 @@ impl Analyzer<'_> {
                 Suffix::Call(Call::MethodCall(mc)) => {
                     let method = ident(mc.name()).unwrap_or("");
                     match (method, arg_string(mc.args())) {
-                        (
-                            "WaitForChild" | "FindFirstChild" | "GetService" | "FindService",
-                            Some(n),
-                        ) => self.child(base, &n),
+                        // Absent here means nil at runtime, which the caller checks for.
+                        ("FindFirstChild", Some(n)) => match self.child(base, &n) {
+                            Target::Missing(_) => Target::Optional,
+                            t => t,
+                        },
+                        ("WaitForChild" | "GetService" | "FindService", Some(n)) => {
+                            self.child(base, &n)
+                        }
                         ("FindFirstAncestor", Some(n)) => {
                             match self.tree.ancestor_named(base, &n) {
                                 Some(a) => Target::Node(a),
