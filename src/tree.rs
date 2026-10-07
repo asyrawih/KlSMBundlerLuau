@@ -1,7 +1,8 @@
 //! Virtual DataModel built from Studio Script Sync output.
 //!
-//! Preferred source is `sourcemap.json` (name/className/filePaths/children). Without
-//! it, the tree is derived from the folder layout using Script Sync's suffixes:
+//! A Rojo `default.project.json` in the root wins: the tree is built from it and the
+//! folders it maps. Without one, the source is `sourcemap.json`
+//! (name/className/filePaths/children), and without that the tree is derived from the folder layout using Script Sync's suffixes:
 //! `.luau` ModuleScript, `.server.luau` Script, `.local.luau` LocalScript,
 //! `.client.luau` Script (RunContext Client), `init*.luau` = the folder's own script.
 //!
@@ -177,6 +178,10 @@ impl Tree {
         let root_dir = root_dir
             .canonicalize()
             .with_context(|| format!("root folder not found: {}", root_dir.display()))?;
+        let project = root_dir.join("default.project.json");
+        if sourcemap.is_none() && project.is_file() {
+            return Tree::from_project(root_dir, &project);
+        }
         let sourcemap = sourcemap
             .map(Path::to_path_buf)
             .unwrap_or_else(|| root_dir.join("sourcemap.json"));
@@ -189,7 +194,9 @@ impl Tree {
             // top-level StarterPlayerScripts would be added next to the nested one.
             tree.nest_starter_player();
             disk.nest_starter_player();
-            tree.stale_files = tree.merge(ROOT, &disk, ROOT);
+            let mut stale = tree.place_by_dir(&disk);
+            stale.extend(tree.merge(ROOT, &disk, ROOT));
+            tree.stale_files = stale;
             tree.missing_files = tree
                 .nodes
                 .iter()
@@ -275,6 +282,112 @@ impl Tree {
         }
     }
 
+    /// The tree a Rojo project file describes (`$className`, `$path`, nested children), read
+    /// straight from disk so it never lags behind. `stale_files` / `missing_files` compare it
+    /// with `sourcemap.json`, so a regenerate brings that file in line for Luau LSP.
+    pub fn from_project(root_dir: PathBuf, project: &Path) -> Result<Tree> {
+        let text = fs::read_to_string(project)
+            .with_context(|| format!("reading {}", project.display()))?;
+        let json: serde_json::Value = serde_json::from_str(&text)
+            .with_context(|| format!("parsing {}", project.display()))?;
+        let Some(root) = json.get("tree") else {
+            bail!("{} has no \"tree\"", project.display());
+        };
+        let mut tree = Tree::empty(root_dir);
+        tree.project_children(ROOT, root)?;
+        let old = tree.root_dir.join("sourcemap.json");
+        let old = if old.is_file() {
+            Tree::from_sourcemap(tree.root_dir.clone(), &old).ok()
+        } else {
+            None
+        };
+        let in_old = |f: &String| old.as_ref().is_some_and(|o| o.by_file.contains_key(f));
+        tree.stale_files = tree
+            .by_file
+            .keys()
+            .filter(|f| !in_old(f))
+            .cloned()
+            .collect();
+        tree.stale_files.sort();
+        if let Some(old) = &old {
+            tree.missing_files = old
+                .by_file
+                .keys()
+                .filter(|f| !tree.by_file.contains_key(*f))
+                .cloned()
+                .collect();
+            tree.missing_files.sort();
+        }
+        Ok(tree)
+    }
+
+    fn project_children(&mut self, id: NodeId, node: &serde_json::Value) -> Result<()> {
+        let Some(map) = node.as_object() else {
+            return Ok(());
+        };
+        for (name, child) in map.iter().filter(|(k, _)| !k.starts_with('$')) {
+            // `$path` is a string or `{ "optional": "path" }`.
+            let rel = match child.get("$path") {
+                Some(serde_json::Value::String(p)) => Some(normalize(p)),
+                Some(p) => p.get("optional").and_then(|p| p.as_str()).map(normalize),
+                None => None,
+            };
+            let abs = rel.as_ref().map(|r| self.root_dir.join(r));
+            let mut class = child
+                .get("$className")
+                .and_then(|c| c.as_str())
+                .map(str::to_string);
+            let mut file = None;
+            let mut scan = None;
+            match (&rel, &abs) {
+                (Some(rel), Some(abs)) if abs.is_dir() => {
+                    let init = fs::read_dir(abs)?
+                        .filter_map(|e| e.ok())
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .filter(|n| n.starts_with("init.") && is_script_file(n))
+                        .min();
+                    if let Some((_, c)) = init.as_deref().and_then(classify) {
+                        class.get_or_insert_with(|| c.to_string());
+                        file = Some(format!("{rel}/{}", init.unwrap()));
+                    }
+                    scan = Some((abs.clone(), rel.clone()));
+                }
+                (Some(rel), Some(_)) if is_script_file(rel) => {
+                    let base = rel.rsplit('/').next().unwrap_or(rel);
+                    if let Some((_, c)) = classify(base) {
+                        class.get_or_insert_with(|| c.to_string());
+                        file = Some(rel.clone());
+                    }
+                }
+                _ => {}
+            }
+            let class = class.unwrap_or_else(|| {
+                if id == ROOT && SERVICES.contains(&name.as_str()) {
+                    name.clone()
+                } else {
+                    "Folder".into()
+                }
+            });
+            // A project entry can name a child its parent's `$path` already produced.
+            let cid = match self.child(id, name) {
+                Some(c) => {
+                    self.nodes[c].class_name = class;
+                    if let Some(f) = file {
+                        self.by_file.insert(f.clone(), c);
+                        self.nodes[c].file = Some(f);
+                    }
+                    c
+                }
+                None => self.add(id, name.clone(), class, file),
+            };
+            if let Some((abs, rel)) = scan {
+                self.scan_dir(cid, &abs, &rel)?;
+            }
+            self.project_children(cid, child)?;
+        }
+        Ok(())
+    }
+
     pub fn from_filesystem(root_dir: PathBuf) -> Result<Tree> {
         let mut tree = Tree::empty(root_dir.clone());
         tree.scan_dir(ROOT, &root_dir, "")?;
@@ -331,6 +444,83 @@ impl Tree {
         Ok(())
     }
 
+    /// Adds `disk` scripts this tree lacks into the instance that already holds their
+    /// folder's other scripts, so project mappings (`"Addon": {"$path": "Addon/Client"}`)
+    /// are followed instead of the raw folder layout. Returns the files placed.
+    fn place_by_dir(&mut self, disk: &Tree) -> Vec<String> {
+        fn dir_of(f: &str) -> &str {
+            f.rsplit_once('/').map_or("", |(d, _)| d)
+        }
+        // Folder -> instance its scripts live in (init.* scripts are the folder itself).
+        fn note(dirs: &mut HashMap<String, NodeId>, f: &str, id: NodeId, parent: NodeId) {
+            let is_init = f.rsplit('/').next().unwrap_or(f).starts_with("init.");
+            dirs.entry(dir_of(f).to_string())
+                .or_insert(if is_init { id } else { parent });
+        }
+        let mut dirs: HashMap<String, NodeId> = HashMap::new();
+        let known: Vec<(String, NodeId)> = self
+            .by_file
+            .iter()
+            .map(|(f, &id)| (f.clone(), id))
+            .collect();
+        for (f, id) in known {
+            note(&mut dirs, &f, id, self.nodes[id].parent.unwrap_or(ROOT));
+        }
+        let mut added = Vec::new();
+        // Disk nodes are in pre-order, so a new init script lands before its children.
+        for o in &disk.nodes {
+            let Some(f) = &o.file else { continue };
+            if self.by_file.contains_key(f) {
+                continue;
+            }
+            let name = f.rsplit('/').next().unwrap_or(f);
+            let dir = if name.starts_with("init.") {
+                dir_of(dir_of(f))
+            } else {
+                dir_of(f)
+            };
+            // Nearest mapped ancestor folder; the rest of the path becomes Folders.
+            let mut base = dir;
+            let mut rest = Vec::new();
+            let parent = loop {
+                if let Some(&id) = dirs.get(base) {
+                    break Some(id);
+                }
+                if base.is_empty() {
+                    break None;
+                }
+                let (up, last) = base.rsplit_once('/').unwrap_or(("", base));
+                rest.push(last);
+                base = up;
+            };
+            // No mapped ancestor: leave it to `merge`.
+            let Some(mut parent) = parent else { continue };
+            for seg in rest.into_iter().rev() {
+                parent = match self.child(parent, seg) {
+                    Some(c) => c,
+                    None => self.add(parent, seg.to_string(), "Folder".into(), None),
+                };
+            }
+            let id = match self.child(parent, &o.name) {
+                Some(c) if self.nodes[c].file.is_none() => {
+                    self.nodes[c].file = Some(f.clone());
+                    self.nodes[c].class_name = o.class_name.clone();
+                    self.by_file.insert(f.clone(), c);
+                    c
+                }
+                _ => self.add(
+                    parent,
+                    o.name.clone(),
+                    o.class_name.clone(),
+                    Some(f.clone()),
+                ),
+            };
+            note(&mut dirs, f, id, parent);
+            added.push(f.clone());
+        }
+        added
+    }
+
     /// Copies scripts from `other` that this tree lacks; returns their files.
     fn merge(&mut self, into: NodeId, other: &Tree, from: NodeId) -> Vec<String> {
         let mut added = Vec::new();
@@ -354,14 +544,24 @@ impl Tree {
                     }
                     added.extend(self.merge(existing, other, oc));
                 }
-                None => {
+                // Only folders that still hold unplaced scripts.
+                None if self.has_new(other, oc) => {
                     let id = self.add(into, o.name.clone(), o.class_name.clone(), o.file.clone());
                     added.extend(o.file.clone());
                     added.extend(self.merge(id, other, oc));
                 }
+                None => {}
             }
         }
         added
+    }
+
+    fn has_new(&self, other: &Tree, id: NodeId) -> bool {
+        let o = &other.nodes[id];
+        o.file
+            .as_ref()
+            .is_some_and(|f| !self.by_file.contains_key(f))
+            || o.children.iter().any(|&c| self.has_new(other, c))
     }
 
     /// Script Sync mirrors StarterPlayerScripts/StarterCharacterScripts at the top

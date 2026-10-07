@@ -51,8 +51,12 @@ own outputs. Remember to disable the original entry script if you do that, or bo
 | Loops over a table of paths | `for _, m in { Commands.A, Commands.B } do require(m) end` |
 | String requires | `require("./Foo")`, `require("../Foo")`, `require("@self/Foo")`, `.luaurc` aliases (`@shared/Foo`) |
 
-The instance tree comes from `sourcemap.json`; scripts on disk that the sourcemap doesn't list yet are
-merged in from the folder layout (`.luau` ModuleScript, `.server.luau` Script, `.local.luau`
+When the root folder has a `default.project.json` (Rojo), the instance tree is read from it and the
+folders its `$path`s point at, so it never lags behind; Studio-only content such as `[place]` assets
+doesn't go through the tree. An explicit `sourcemap` in the config skips the project file.
+
+Otherwise the instance tree comes from `sourcemap.json`; scripts on disk that the sourcemap doesn't list yet are
+merged in next to the scripts already listed from their folder, else from the folder layout (`.luau` ModuleScript, `.server.luau` Script, `.local.luau`
 LocalScript, `.client.luau` Script/Client, `init.*` = the folder's own script). StarterPlayerScripts
 and StarterCharacterScripts are placed under StarterPlayer as in the real DataModel.
 `klsm tree --root <folder>` prints what it sees.

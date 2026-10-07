@@ -28,6 +28,9 @@ pub enum Target {
     Dynamic,
     /// `require(123456)` — a published asset; left untouched.
     Asset,
+    /// A soft link, `if folder then folder:FindFirstChild("X") else nil`: the module may
+    /// not exist, so it's left to the runtime (the stand-in returns nil for unbundled ones).
+    Optional,
 }
 
 #[derive(Debug, Clone)]
@@ -257,6 +260,12 @@ impl Analyzer<'_> {
             Expression::Var(Var::Expression(ve)) => self.eval_chain(ve.prefix(), ve.suffixes()),
             Expression::FunctionCall(fc) => self.eval_chain(fc.prefix(), fc.suffixes()),
             Expression::Number(_) => Target::Asset,
+            Expression::IfExpression(ie)
+                if ie.else_if_expressions().is_none()
+                    && matches!(unparen(ie.else_expression()), Expression::Symbol(t) if t.token().to_string() == "nil") =>
+            {
+                Target::Optional
+            }
             _ => Target::Dynamic,
         }
     }
@@ -423,7 +432,7 @@ impl Visitor for Analyzer<'_> {
                     }
                     self.env.insert(name.to_string(), target);
                 }
-                Some((_, target @ Target::Missing(_))) => {
+                Some((_, target @ (Target::Missing(_) | Target::Optional))) => {
                     self.env.insert(name.to_string(), target);
                 }
                 _ => {

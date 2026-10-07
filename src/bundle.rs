@@ -312,7 +312,7 @@ pub fn bundle(opts: &Options) -> Bundle {
                     ));
                     continue;
                 }
-                Target::Asset => continue,
+                Target::Asset | Target::Optional => continue,
             };
             for target in &targets {
                 let t = tree.node(*target);

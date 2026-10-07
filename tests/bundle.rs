@@ -934,3 +934,115 @@ fn eager_cycle_fails_under_luau() {
         "{stderr}"
     );
 }
+
+#[test]
+fn new_scripts_follow_project_mappings() {
+    // default.project.json maps Addon/Client -> StarterPlayerScripts.Addon; a script
+    // added after the sourcemap was written must land there, not at game.Addon.
+    let dir = std::env::temp_dir().join(format!("klsm-mapped-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("Addon/Client/Parts")).unwrap();
+    for f in [
+        "Addon/Client/A.luau",
+        "Addon/Client/B.luau",
+        "Addon/Client/Parts/C.luau",
+    ] {
+        std::fs::write(dir.join(f), "return {}\n").unwrap();
+    }
+    std::fs::write(
+        dir.join("sourcemap.json"),
+        r#"{ "name": "Game", "className": "DataModel", "filePaths": [], "children": [
+          { "name": "StarterPlayer", "className": "StarterPlayer", "filePaths": [], "children": [
+            { "name": "StarterPlayerScripts", "className": "StarterPlayerScripts", "filePaths": [], "children": [
+              { "name": "Addon", "className": "Folder", "filePaths": [], "children": [
+                { "name": "A", "className": "ModuleScript", "filePaths": ["Addon/Client/A.luau"], "children": [] }
+              ] }
+            ] }
+          ] }
+        ] }"#,
+    )
+    .unwrap();
+    let tree = Tree::load(&dir, None).unwrap();
+    let a = tree.by_file("Addon/Client/A.luau").unwrap();
+    let addon = tree.node(a).parent.unwrap();
+    assert_eq!(tree.by_file("Addon/Client/B.luau"), tree.child(addon, "B"));
+    let parts = tree.child(addon, "Parts").unwrap();
+    assert_eq!(
+        tree.by_file("Addon/Client/Parts/C.luau"),
+        tree.child(parts, "C")
+    );
+    assert!(tree.child(ROOT, "Addon").is_none(), "no stray game.Addon");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn soft_links_are_optional() {
+    let tree = Tree::load(Path::new("tests/fixtures/basic"), None).unwrap();
+    let node = tree
+        .find_file(Path::new("ReplicatedStorage/Shared/Suite.luau"))
+        .unwrap();
+    let src = r#"
+local folder = script.Parent:FindFirstChild("Nope")
+local m = if folder then folder:FindFirstChild("X") else nil
+local a = if m then require(m) else nil
+local b = require(other)
+"#;
+    let a = klsm_bundler::analyze::analyze(src, &tree, node, &Aliases::new()).unwrap();
+    use klsm_bundler::analyze::Target;
+    assert_eq!(a.requires[0].target, Target::Optional);
+    assert_eq!(
+        a.requires[1].target,
+        Target::Dynamic,
+        "plain variables still warn"
+    );
+}
+
+#[test]
+fn project_file_drives_the_tree() {
+    let dir = std::env::temp_dir().join(format!("klsm-project-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("Addon/Client/Parts")).unwrap();
+    std::fs::create_dir_all(dir.join("Unsynced")).unwrap();
+    for f in [
+        "Addon/Client/A.luau",
+        "Addon/Client/Parts/C.luau",
+        "Unsynced/X.luau",
+    ] {
+        std::fs::write(dir.join(f), "return {}\n").unwrap();
+    }
+    std::fs::write(
+        dir.join("default.project.json"),
+        r#"{ "name": "t", "tree": { "$className": "DataModel",
+          "StarterPlayer": { "$className": "StarterPlayer",
+            "StarterPlayerScripts": { "$className": "StarterPlayerScripts",
+              "Addon": { "$path": "Addon/Client" } } } } }"#,
+    )
+    .unwrap();
+    // A sourcemap that lags behind and lists a deleted file.
+    std::fs::write(
+        dir.join("sourcemap.json"),
+        r#"{ "name": "Game", "className": "DataModel", "children": [
+          { "name": "Gone", "className": "ModuleScript", "filePaths": ["Gone.luau"] } ] }"#,
+    )
+    .unwrap();
+    let tree = Tree::load(&dir, None).unwrap();
+    let sps = tree
+        .child(
+            tree.child(ROOT, "StarterPlayer").unwrap(),
+            "StarterPlayerScripts",
+        )
+        .unwrap();
+    let addon = tree.child(sps, "Addon").unwrap();
+    let parts = tree.child(addon, "Parts").unwrap();
+    assert_eq!(
+        tree.by_file("Addon/Client/Parts/C.luau"),
+        tree.child(parts, "C")
+    );
+    assert!(
+        tree.by_file("Unsynced/X.luau").is_none(),
+        "only what the project syncs"
+    );
+    assert_eq!(tree.missing_files, ["Gone.luau"]);
+    assert_eq!(tree.stale_files.len(), 2);
+    std::fs::remove_dir_all(&dir).ok();
+}
